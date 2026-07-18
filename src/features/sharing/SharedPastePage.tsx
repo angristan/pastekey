@@ -50,8 +50,13 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
 
   async function copy() {
     if (!payload) return;
-    await navigator.clipboard.writeText(payload.content);
-    setCopied(true);
+    setPanelError(null);
+    try {
+      await navigator.clipboard.writeText(payload.content);
+      setCopied(true);
+    } catch (cause) {
+      setPanelError(messageOf(cause));
+    }
   }
 
   return (

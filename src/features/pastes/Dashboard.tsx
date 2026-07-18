@@ -65,18 +65,17 @@ export function Dashboard({
 
   async function sharePaste(paste: UnlockedPaste) {
     setError(null);
-    try {
-      const share = await createShareEnvelope(paste.stored.id, paste.pasteKey, paste.stored.expiresAt);
-      await api(`/api/pastes/${paste.stored.id}/shares`, {
-        method: "POST",
-        ...jsonBody(share.write),
-      });
-      const url = `${window.location.origin}/s/${share.write.id}#${share.secret}`;
-      await navigator.clipboard.writeText(url);
-      setNotice("Encrypted share link copied. The key never touched the server.");
-    } catch (cause) {
-      setError(messageOf(cause));
-    }
+    const share = await createShareEnvelope(paste.stored.id, paste.pasteKey, paste.stored.expiresAt);
+    const created = await api<{ id: string; createdAt: number }>(`/api/pastes/${paste.stored.id}/shares`, {
+      method: "POST",
+      ...jsonBody(share.write),
+    });
+    const url = `${window.location.origin}/s/${share.write.id}#${share.secret}`;
+    setNotice("Encrypted link created. Copy it from the open link panel before leaving this page.");
+    return {
+      share: { id: created.id, createdAt: created.createdAt, expiresAt: share.write.expiresAt },
+      url,
+    };
   }
 
   async function addPasskey() {
@@ -115,7 +114,8 @@ export function Dashboard({
           variant="primary"
           size="lg"
           icon={PlusIcon}
-          onClick={() => setCreator((current) => current ? null : "choose")}
+          disabled={creator !== null}
+          onClick={() => setCreator("choose")}
         >
           Create
         </Button>
@@ -174,12 +174,14 @@ export function Dashboard({
         {loading ? (
           <CenteredStatus label="Decrypting your items…" compact />
         ) : pastes.length === 0 ? (
-          <LayerCard className="empty-card">
-            <LockKeyIcon size={32} weight="duotone" />
-            <h2>Your vault is empty</h2>
-            <p>Create a text paste or file drop. Everything is encrypted before it leaves your browser.</p>
-            <Button variant="primary" icon={PlusIcon} onClick={() => setCreator("choose")}>Create your first item</Button>
-          </LayerCard>
+          creator === null ? (
+            <LayerCard className="empty-card">
+              <LockKeyIcon size={32} weight="duotone" />
+              <h2>Your vault is empty</h2>
+              <p>Create a text paste or file drop. Everything is encrypted before it leaves your browser.</p>
+              <Button variant="primary" icon={PlusIcon} onClick={() => setCreator("choose")}>Create your first item</Button>
+            </LayerCard>
+          ) : null
         ) : (
           pastes.map((paste) => (
             <PasteCard key={paste.stored.id} paste={paste} onShare={() => sharePaste(paste)} onDelete={() => deletePaste(paste)} />

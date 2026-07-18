@@ -264,7 +264,7 @@ a { color: inherit; }
 .file-picker-button:hover { background: #f0eee7; }
 .file-picker-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 .selected-files { display: grid; gap: 7px; }
-.selected-files > div { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; background: #f0eee7; }
+.selected-files > div { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; background: #f0eee7; }
 .selected-files span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .selected-files small { color: var(--muted); }
 .composer-actions { border-top: 1px solid var(--line); padding-top: 18px; }
@@ -283,6 +283,10 @@ a { color: inherit; }
 .share-list > div:first-child { display: flex; justify-content: space-between; gap: 16px; }
 .share-list strong { font-size: 13px; }
 .share-list > div:first-child span, .share-list > p { margin: 0; color: var(--muted); font-size: 11px; }
+.new-share-link { padding: 12px; border: 1px solid #b8c8bc; border-radius: 8px; background: #edf5ee; }
+.new-share-link label { display: block; margin-bottom: 7px; color: #326048; font-size: 12px; font-weight: 700; }
+.new-share-link > div { display: flex; align-items: center; gap: 8px; }
+.new-share-link input { min-width: 0; flex: 1; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font: 11px var(--mono); }
 .share-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; }
 .share-row code { font: 11px var(--mono); }
 .share-row > span { color: var(--muted); font-size: 11px; }
@@ -365,6 +369,8 @@ a { color: inherit; }
   .paste-actions { justify-content: flex-end; flex-wrap: wrap; }
   .paste-actions button span { display: none; }
   .attachment-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .new-share-link > div { align-items: stretch; flex-direction: column; }
+  .new-share-link input { width: 100%; }
   .attachment-actions { grid-column: 2 / -1; justify-content: flex-end; flex-wrap: wrap; }
   .attachment-preview { padding: 10px; }
   .shared-heading, .shared-footer, .shared-content { padding-left: 20px; padding-right: 20px; }

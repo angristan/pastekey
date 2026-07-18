@@ -24,7 +24,7 @@ Passkey PRF ──HKDF──> passkey wrapping key
 - Item type, title, format, and text content are encrypted together; legacy pastes remain compatible.
 - Every file has an independent key; filename, MIME type, and bytes are encrypted locally before R2 upload.
 - Raster images, audio, video, and text can be decrypted for an on-demand local preview; active HTML, SVG, XML, and unknown formats are never embedded.
-- Share links contain a random secret after `#`; URL fragments are not sent to the server.
+- Share links contain a random secret after `#`; URL fragments are not sent to the server. A new link is shown for copying only in the browser session that created it.
 - Revoking a share deletes its wrapped paste-key envelope. It cannot revoke plaintext already copied by a recipient.
 - D1 and R2 still expose metadata: account/paste/file counts, timestamps, ciphertext sizes, expiry, and access metadata.
 - Losing every passkey means losing the vault. There is no server-side reset in this version.

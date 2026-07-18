@@ -16,6 +16,7 @@ export function AttachmentList({
   className = "attachment-list",
   downloadEndpoint,
   emptyMessage,
+  id,
   onDelete,
   onError,
   title = "Encrypted attachments",
@@ -25,13 +26,14 @@ export function AttachmentList({
   className?: string;
   downloadEndpoint: (attachment: UnlockedAttachment) => string;
   emptyMessage?: string;
+  id?: string;
   onDelete?: (attachment: UnlockedAttachment) => Promise<void>;
   onError: (message: string) => void;
   title?: string;
   buttonSize?: "xs" | "sm";
 }) {
   return (
-    <div className={className}>
+    <div className={className} id={id}>
       <strong>{title}</strong>
       {attachments.length === 0 && emptyMessage ? <p>{emptyMessage}</p> : attachments.map((attachment) => (
         <AttachmentRow
@@ -62,6 +64,8 @@ function AttachmentRow({
 }) {
   const kind = attachmentPreviewKind(attachment.metadata.type);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [preview, setPreview] = useState<{
     kind: AttachmentPreviewKind;
     text?: string;
@@ -98,6 +102,30 @@ function AttachmentRow({
     }
   }
 
+  async function download() {
+    setDownloading(true);
+    try {
+      await downloadAttachment(endpoint, attachment);
+    } catch (cause) {
+      onError(messageOf(cause));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  async function remove() {
+    if (!onDelete) return;
+    setDeleting(true);
+    setPreview(null);
+    try {
+      await onDelete(attachment);
+    } catch (cause) {
+      onError(messageOf(cause));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <>
       <div className="attachment-row">
@@ -119,7 +147,8 @@ function AttachmentRow({
           <Button
             size={buttonSize}
             icon={DownloadSimpleIcon}
-            onClick={() => downloadAttachment(endpoint, attachment).catch((cause) => onError(messageOf(cause)))}
+            loading={downloading}
+            onClick={download}
           >
             Download
           </Button>
@@ -127,10 +156,8 @@ function AttachmentRow({
             <Button
               size={buttonSize}
               variant="secondary-destructive"
-              onClick={() => {
-                setPreview(null);
-                onDelete(attachment).catch((cause) => onError(messageOf(cause)));
-              }}
+              loading={deleting}
+              onClick={remove}
             >
               Delete
             </Button>

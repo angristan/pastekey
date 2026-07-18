@@ -1,5 +1,6 @@
 import { Badge, Button, LayerCard } from "@cloudflare/kumo";
 import {
+  CheckIcon,
   CopyIcon,
   KeyIcon,
   PaperclipIcon,
@@ -16,21 +17,36 @@ import { formatDate, formatExpiry, messageOf } from "../../lib/format";
 import { itemKindOf, type StoredAttachment } from "../../lib/types";
 import type { UnlockedPaste } from "./types";
 
+type ShareSummary = {
+  id: string;
+  createdAt: number;
+  expiresAt: number | null;
+};
+
 export function PasteCard({
   paste,
   onShare,
   onDelete,
 }: {
   paste: UnlockedPaste;
-  onShare: () => void;
+  onShare: () => Promise<{ share: ShareSummary; url: string }>;
   onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [shares, setShares] = useState<{ id: string; createdAt: number; expiresAt: number | null }[] | null>(null);
+  const [shares, setShares] = useState<ShareSummary[] | null>(null);
   const [attachments, setAttachments] = useState<UnlockedAttachment[] | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
+  const [newShareUrl, setNewShareUrl] = useState<string | null>(null);
+  const [copiedPaste, setCopiedPaste] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [loadingShares, setLoadingShares] = useState(false);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
   const fileItem = itemKindOf(paste.payload) === "files";
   const preview = paste.payload.content.split("\n").slice(0, 4).join("\n");
+  const sharePanelId = `share-panel-${paste.stored.id}`;
+  const filePanelId = `file-panel-${paste.stored.id}`;
 
   useEffect(() => {
     if (!fileItem) return;
@@ -42,25 +58,64 @@ export function PasteCard({
     return () => { active = false; };
   }, [fileItem, paste.stored.id, paste.pasteKey]);
 
+  async function loadShares() {
+    const result = await api<{ shares: ShareSummary[] }>(`/api/pastes/${paste.stored.id}/shares`);
+    return result.shares;
+  }
+
   async function toggleShares() {
-    if (shares) return setShares(null);
+    if (shares !== null) {
+      setShares(null);
+      return;
+    }
     setPanelError(null);
+    setLoadingShares(true);
     try {
-      const result = await api<{ shares: { id: string; createdAt: number; expiresAt: number | null }[] }>(
-        `/api/pastes/${paste.stored.id}/shares`,
-      );
-      setShares(result.shares);
+      setShares(await loadShares());
+    } catch (cause) {
+      setPanelError(messageOf(cause));
+    } finally {
+      setLoadingShares(false);
+    }
+  }
+
+  async function createShare() {
+    setPanelError(null);
+    setSharing(true);
+    try {
+      const created = await onShare();
+      setShares((current) => [created.share, ...(current ?? [])]);
+      setNewShareUrl(created.url);
+      setCopiedLink(false);
+    } catch (cause) {
+      setPanelError(messageOf(cause));
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function copyShareLink() {
+    if (!newShareUrl) return;
+    try {
+      await navigator.clipboard.writeText(newShareUrl);
+      setCopiedLink(true);
     } catch (cause) {
       setPanelError(messageOf(cause));
     }
   }
 
   async function revokeShare(id: string) {
+    if (!window.confirm("Revoke this share link? Anyone using it will immediately lose access.")) return;
+    setPanelError(null);
+    setRevokingShareId(id);
     try {
       await api<void>(`/api/pastes/${paste.stored.id}/shares/${id}`, { method: "DELETE" });
       setShares((current) => current?.filter((share) => share.id !== id) ?? []);
+      if (newShareUrl?.includes(`/s/${id}#`)) setNewShareUrl(null);
     } catch (cause) {
       setPanelError(messageOf(cause));
+    } finally {
+      setRevokingShareId(null);
     }
   }
 
@@ -72,18 +127,34 @@ export function PasteCard({
   }
 
   async function toggleFiles() {
-    if (attachments) return setAttachments(null);
+    if (attachments !== null) {
+      setAttachments(null);
+      return;
+    }
     setPanelError(null);
+    setLoadingFiles(true);
     try {
       setAttachments(await loadAttachments());
     } catch (cause) {
       setPanelError(messageOf(cause));
+    } finally {
+      setLoadingFiles(false);
     }
   }
 
   async function removeFile(attachment: UnlockedAttachment) {
+    if (!window.confirm(`Delete “${attachment.metadata.name}”? This cannot be undone.`)) return;
     await api<void>(`/api/pastes/${paste.stored.id}/files/${attachment.stored.id}`, { method: "DELETE" });
     setAttachments((current) => current?.filter((item) => item.stored.id !== attachment.stored.id) ?? []);
+  }
+
+  async function copyPaste() {
+    try {
+      await navigator.clipboard.writeText(paste.payload.content);
+      setCopiedPaste(true);
+    } catch (cause) {
+      setPanelError(messageOf(cause));
+    }
   }
 
   return (
@@ -97,11 +168,36 @@ export function PasteCard({
           <p>Updated {formatDate(paste.stored.updatedAt)} · {formatExpiry(paste.stored.expiresAt)}</p>
         </div>
         <div className="paste-actions">
-          <Button size="sm" icon={ShareNetworkIcon} onClick={onShare}>Share</Button>
-          {!fileItem && <Button size="sm" variant="ghost" icon={PaperclipIcon} onClick={toggleFiles}>Files</Button>}
-          <Button size="sm" variant="ghost" icon={KeyIcon} onClick={toggleShares}>Links</Button>
+          <Button size="sm" icon={ShareNetworkIcon} loading={sharing} onClick={createShare}>Share</Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={KeyIcon}
+            loading={loadingShares}
+            data-state={shares !== null ? "open" : "closed"}
+            aria-expanded={shares !== null}
+            aria-controls={sharePanelId}
+            onClick={toggleShares}
+          >
+            Manage links
+          </Button>
           {!fileItem && (
-            <Button size="sm" variant="ghost" icon={CopyIcon} onClick={() => navigator.clipboard.writeText(paste.payload.content)}>Copy</Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={PaperclipIcon}
+              loading={loadingFiles}
+              aria-expanded={attachments !== null}
+              aria-controls={filePanelId}
+              onClick={toggleFiles}
+            >
+              Attachments
+            </Button>
+          )}
+          {!fileItem && (
+            <Button size="sm" variant="ghost" icon={copiedPaste ? CheckIcon : CopyIcon} onClick={copyPaste}>
+              {copiedPaste ? "Copied" : "Copy"}
+            </Button>
           )}
           <Button
             size="sm"
@@ -114,17 +210,40 @@ export function PasteCard({
         </div>
       </div>
       {panelError && <div className="share-error">{panelError}</div>}
-      {shares && (
-        <div className="share-list">
+      {shares !== null && (
+        <div className="share-list" id={sharePanelId}>
           <div>
-            <strong>Active encrypted links</strong>
-            <span>Secrets aren’t stored, so existing links can only be revoked.</span>
+            <strong>Encrypted share links</strong>
+            <span>Existing secrets aren’t stored, so links can be revoked but not shown again.</span>
           </div>
+          {newShareUrl && (
+            <div className="new-share-link">
+              <label htmlFor={`new-share-${paste.stored.id}`}>New link — copy it now</label>
+              <div>
+                <input
+                  id={`new-share-${paste.stored.id}`}
+                  readOnly
+                  value={newShareUrl}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <Button size="sm" variant="primary" icon={copiedLink ? CheckIcon : CopyIcon} onClick={copyShareLink}>
+                  {copiedLink ? "Copied" : "Copy link"}
+                </Button>
+              </div>
+            </div>
+          )}
           {shares.length === 0 ? <p>No active links.</p> : shares.map((share) => (
             <div className="share-row" key={share.id}>
               <code>{share.id.slice(0, 10)}…</code>
               <span>{formatExpiry(share.expiresAt)}</span>
-              <Button size="xs" variant="secondary-destructive" onClick={() => revokeShare(share.id)}>Revoke</Button>
+              <Button
+                size="xs"
+                variant="secondary-destructive"
+                loading={revokingShareId === share.id}
+                onClick={() => revokeShare(share.id)}
+              >
+                Revoke
+              </Button>
             </div>
           ))}
         </div>
@@ -135,8 +254,10 @@ export function PasteCard({
       {attachments && (
         <AttachmentList
           attachments={attachments}
+          className="attachment-list"
           downloadEndpoint={(attachment) => `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`}
           emptyMessage={fileItem ? "No files remain in this drop." : "No files attached."}
+          id={filePanelId}
           onDelete={removeFile}
           onError={setPanelError}
           title={fileItem ? "Encrypted files" : "Encrypted attachments"}

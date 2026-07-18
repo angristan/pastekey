@@ -1,5 +1,5 @@
 import { Badge, Banner, Button, Input, LayerCard, Select, Textarea } from "@cloudflare/kumo";
-import { FileIcon, LockKeyIcon, PaperclipIcon } from "@phosphor-icons/react";
+import { FileIcon, LockKeyIcon, PaperclipIcon, XIcon } from "@phosphor-icons/react";
 import { useState, type FormEvent } from "react";
 
 import { api, jsonBody } from "../../lib/api";
@@ -147,11 +147,13 @@ export function PasteComposer({
                   onChange={(event) => {
                     const selected = Array.from(event.target.files ?? []);
                     if (selected.length > limits.maxFilesPerPaste) {
+                      setFiles([]);
                       setError(`Choose at most ${limits.maxFilesPerPaste} files.`);
                       return;
                     }
                     const invalid = selected.find((file) => file.size === 0 || file.size > limits.maxFileBytes);
                     if (invalid) {
+                      setFiles([]);
                       setError(`${invalid.name} must be between 1 byte and ${formatBytes(limits.maxFileBytes)}.`);
                       return;
                     }
@@ -169,6 +171,15 @@ export function PasteComposer({
                     <FileIcon />
                     <span>{file.name}</span>
                     <small>{formatBytes(file.size)}</small>
+                    <Button
+                      type="button"
+                      size="xs"
+                      shape="square"
+                      variant="ghost"
+                      icon={XIcon}
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                    />
                   </div>
                 ))}
               </div>
