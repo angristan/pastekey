@@ -2,6 +2,46 @@ import type { StoredAttachment } from "../../src/lib/types";
 import { validOpaque } from "../lib/http";
 import type { AppContext } from "../types";
 
+export type AttachmentInsert = {
+  id: string;
+  pasteId: string;
+  ownerId: string;
+  objectKey: string;
+  ciphertextSize: number;
+  contentIv: string;
+  wrappedKey: string;
+  wrappedKeyIv: string;
+  metadataCiphertext: string;
+  metadataIv: string;
+  createdAt: number;
+};
+
+export async function insertAttachment(db: D1Database, attachment: AttachmentInsert) {
+  return db.prepare(
+    `INSERT INTO attachments (
+      id, paste_id, object_key, ciphertext_size, content_iv, wrapped_key, wrapped_key_iv,
+      metadata_ciphertext, metadata_iv, created_at
+    )
+    SELECT ?, p.id, ?, ?, ?, ?, ?, ?, ?, ?
+    FROM pastes p JOIN users u ON u.id = p.owner_id
+    WHERE p.id = ? AND p.owner_id = ? AND u.deletion_requested_at IS NULL`,
+  )
+    .bind(
+      attachment.id,
+      attachment.objectKey,
+      attachment.ciphertextSize,
+      attachment.contentIv,
+      attachment.wrappedKey,
+      attachment.wrappedKeyIv,
+      attachment.metadataCiphertext,
+      attachment.metadataIv,
+      attachment.createdAt,
+      attachment.pasteId,
+      attachment.ownerId,
+    )
+    .run();
+}
+
 export async function listAttachments(db: D1Database, pasteId: string) {
   const rows = await db.prepare(
     `SELECT id, paste_id AS pasteId, ciphertext_size AS ciphertextSize, content_iv AS contentIv,

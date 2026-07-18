@@ -3,6 +3,7 @@ import { createExecutionContext, createMessageBatch, getQueueResult, SELF } from
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { hashToken } from "../lib/encoding";
+import { insertAttachment } from "../repositories/attachments";
 import { consumeDeletionQueue } from "../services/deletions";
 import type { Bindings, DeletionMessage } from "../types";
 
@@ -32,6 +33,31 @@ describe("authenticated attachment routes", () => {
     await bindings.FILES.delete(objectKey);
     await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("rejects finalization after account deletion begins", async () => {
+    await bindings.DB.prepare(
+      "UPDATE users SET deletion_requested_at = ?, deletion_workflow_id = ? WHERE id = ?",
+    )
+      .bind(Date.now(), "account-test-workflow", userId)
+      .run();
+
+    const result = await insertAttachment(bindings.DB, {
+      id: fileId,
+      pasteId,
+      ownerId: userId,
+      objectKey,
+      ciphertextSize: 32,
+      contentIv: "AA",
+      wrappedKey: "AA",
+      wrappedKeyIv: "AA",
+      metadataCiphertext: "AA",
+      metadataIv: "AA",
+      createdAt: Date.now(),
+    });
+
+    expect(result.meta.changes).toBe(0);
+    expect(await bindings.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first()).toBeNull();
   });
 
   it("queues individual file deletion without leaving metadata", async () => {

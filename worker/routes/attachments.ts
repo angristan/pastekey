@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import { OPAQUE_ID, serviceLimits } from "../lib/config";
 import {
+  insertAttachment,
   listAttachments,
   readAttachmentHeaders,
   streamR2Object,
@@ -70,29 +71,28 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
   });
 
   const now = Date.now();
+  let inserted: D1Result;
   try {
-    await c.env.DB.prepare(
-      `INSERT INTO attachments (
-        id, paste_id, object_key, ciphertext_size, content_iv, wrapped_key, wrapped_key_iv,
-        metadata_ciphertext, metadata_iv, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(
-        fileId,
-        pasteId,
-        objectKey,
-        length,
-        fields.contentIv,
-        fields.wrappedKey,
-        fields.wrappedKeyIv,
-        fields.metadataCiphertext,
-        fields.metadataIv,
-        now,
-      )
-      .run();
+    inserted = await insertAttachment(c.env.DB, {
+      id: fileId,
+      pasteId,
+      ownerId: userId,
+      objectKey,
+      ciphertextSize: length,
+      contentIv: fields.contentIv,
+      wrappedKey: fields.wrappedKey,
+      wrappedKeyIv: fields.wrappedKeyIv,
+      metadataCiphertext: fields.metadataCiphertext,
+      metadataIv: fields.metadataIv,
+      createdAt: now,
+    });
   } catch {
     await c.env.FILES.delete(objectKey);
     return c.json({ error: "Attachment could not be saved" }, 409);
+  }
+  if (!inserted.meta.changes) {
+    await c.env.FILES.delete(objectKey);
+    return c.json({ error: "Item is no longer available" }, 409);
   }
 
   return c.json({ id: fileId, createdAt: now }, 201);
