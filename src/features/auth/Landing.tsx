@@ -1,4 +1,4 @@
-import { Badge, Banner, Button, LayerCard } from "@cloudflare/kumo";
+import { Banner, Button, LayerCard } from "@cloudflare/kumo";
 import { FingerprintIcon, KeyIcon, LockKeyIcon, PlusIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
@@ -33,7 +33,6 @@ export function Landing({
       <header className="brandbar">
         <Brand />
         <div className="header-actions">
-          <Badge>Preview</Badge>
           <GitHubLink />
         </div>
       </header>
