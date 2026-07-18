@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { StoredAttachment } from "../../../shared/protocol/attachments";
-import { api } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
 import { encryptAttachment } from "../../lib/crypto";
 import { messageOf } from "../../lib/format";
 import { uploadWithRetry } from "../../lib/uploads";
@@ -25,6 +25,21 @@ export type UploadSession = {
 };
 
 export type UploadPayloadCache = ReturnType<typeof createUploadPayloadCache>;
+
+type UploadDependencies = {
+  encrypt: typeof encryptAttachment;
+  upload: typeof uploadWithRetry;
+  list: (pasteId: string) => Promise<StoredAttachment[]>;
+};
+
+const defaultDependencies: UploadDependencies = {
+  encrypt: encryptAttachment,
+  upload: uploadWithRetry,
+  list: async (pasteId) => {
+    const response = await api<{ attachments: StoredAttachment[] }>(`/api/pastes/${pasteId}/files`);
+    return response.attachments;
+  },
+};
 
 let nextSelectionId = 0;
 
@@ -56,49 +71,13 @@ export function useUploadSession() {
     setFiles((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
   }
 
-  async function uploadFile(selected: SelectedFile, uploadSession: UploadSession) {
-    updateFile(selected.id, { progress: 0, error: undefined, attempt: undefined, maxAttempts: undefined });
-    try {
-      let attachment = payloads.current.get(selected.id);
-      if (!attachment) {
-        updateFile(selected.id, { phase: "encrypting" });
-        attachment = await encryptAttachment(uploadSession.pasteKey, uploadSession.pasteId, selected.file);
-        payloads.current.retain(selected.id, attachment);
-      }
-      updateFile(selected.id, { phase: "uploading" });
-      await uploadWithRetry(
-        `/api/pastes/${uploadSession.pasteId}/files/${attachment.id}`,
-        attachment.body,
-        attachment.headers,
-        {
-          onProgress: (loaded, reportedTotal) => {
-            const total = reportedTotal || attachment.body.byteLength;
-            updateFile(selected.id, {
-              phase: "uploading",
-              progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
-            });
-          },
-          onRetry: (attempt, maxAttempts) => updateFile(selected.id, {
-            phase: "retrying",
-            progress: 0,
-            attempt,
-            maxAttempts,
-          }),
-          confirmConflict: async () => {
-            const result = await api<{ attachments: StoredAttachment[] }>(
-              `/api/pastes/${uploadSession.pasteId}/files`,
-            );
-            return result.attachments.some(({ id }) => id === attachment.id);
-          },
-        },
-      );
-      payloads.current.release(selected.id);
-      updateFile(selected.id, { phase: "complete", progress: 100, attempt: undefined, maxAttempts: undefined });
-      return true;
-    } catch (cause) {
-      updateFile(selected.id, { phase: "error", progress: 0, error: messageOf(cause) });
-      return false;
-    }
+  function uploadFile(selected: SelectedFile, uploadSession: UploadSession) {
+    return uploadSelectedFile({
+      selected,
+      session: uploadSession,
+      payloads: payloads.current,
+      update: (patch) => updateFile(selected.id, patch),
+    });
   }
 
   function beginSession(uploadSession: UploadSession) {
@@ -119,6 +98,74 @@ export function useUploadSession() {
     session,
     uploadFile,
   };
+}
+
+export async function uploadSelectedFile({
+  selected,
+  session,
+  payloads,
+  update,
+  dependencies = defaultDependencies,
+}: {
+  selected: SelectedFile;
+  session: UploadSession;
+  payloads: UploadPayloadCache;
+  update: (patch: Partial<SelectedFile>) => void;
+  dependencies?: UploadDependencies;
+}) {
+  update({ progress: 0, error: undefined, attempt: undefined, maxAttempts: undefined });
+  try {
+    let attachment = payloads.get(selected.id);
+    if (!attachment) {
+      update({ phase: "encrypting" });
+      attachment = await dependencies.encrypt(session.pasteKey, session.pasteId, selected.file);
+      payloads.retain(selected.id, attachment);
+    }
+    update({ phase: "uploading" });
+    await dependencies.upload(
+      `/api/pastes/${session.pasteId}/files/${attachment.id}`,
+      attachment.body,
+      attachment.headers,
+      {
+        onProgress: (loaded, reportedTotal) => {
+          const total = reportedTotal || attachment.body.byteLength;
+          update({
+            phase: "uploading",
+            progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
+          });
+        },
+        onRetry: (attempt, maxAttempts) => update({
+          phase: "retrying",
+          progress: 0,
+          attempt,
+          maxAttempts,
+        }),
+        confirmConflict: async () => {
+          const attachments = await dependencies.list(session.pasteId);
+          return attachments.some(({ id }) => id === attachment.id);
+        },
+      },
+    );
+    payloads.release(selected.id);
+    update({ phase: "complete", progress: 100, attempt: undefined, maxAttempts: undefined });
+    return true;
+  } catch (cause) {
+    update({ phase: "error", progress: 0, error: messageOf(cause) });
+    return false;
+  }
+}
+
+export async function discardUploadSession(
+  pasteId: string,
+  remove: (pasteId: string) => Promise<void> = async (id) => {
+    await api<void>(`/api/pastes/${id}`, { method: "DELETE" });
+  },
+) {
+  try {
+    await remove(pasteId);
+  } catch (cause) {
+    if (!(cause instanceof ApiError && cause.status === 404)) throw cause;
+  }
 }
 
 export function createUploadPayloadCache() {

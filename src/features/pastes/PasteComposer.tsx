@@ -9,10 +9,10 @@ import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "rea
 
 import type { AppConfig } from "../../../shared/protocol/config";
 import type { ItemKind } from "../../../shared/protocol/pastes";
-import { api, ApiError, jsonBody } from "../../lib/api";
+import { api, jsonBody } from "../../lib/api";
 import { encryptNewPaste } from "../../lib/crypto";
 import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
-import { type SelectedFile, useUploadSession } from "./useUploadSession";
+import { discardUploadSession, type SelectedFile, useUploadSession } from "./useUploadSession";
 
 export function PasteComposer({
   accountKey,
@@ -184,16 +184,11 @@ export function PasteComposer({
     setSaving(true);
     setError(null);
     try {
-      await api<void>(`/api/pastes/${uploadSession.pasteId}`, { method: "DELETE" });
+      await discardUploadSession(uploadSession.pasteId);
       finishSession();
       onCancel();
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 404) {
-        finishSession();
-        onCancel();
-      } else {
-        setError(messageOf(cause));
-      }
+      setError(messageOf(cause));
     } finally {
       setSaving(false);
     }

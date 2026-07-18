@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { createUploadPayloadCache } from "./useUploadSession";
+import { ApiError } from "../../lib/api";
+import {
+  createUploadPayloadCache,
+  discardUploadSession,
+  uploadSelectedFile,
+} from "./useUploadSession";
 
 const payload = {
   id: "file-0000000000000001",
@@ -24,6 +29,44 @@ describe("upload payload ownership", () => {
     cache.release("selection");
     expect(cache.get("selection")).toBeUndefined();
     expect(cache.size).toBe(0);
+  });
+
+  it("reuses encrypted bytes after failure and releases them after success", async () => {
+    const cache = createUploadPayloadCache();
+    const encrypt = vi.fn(async () => payload);
+    const upload = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(undefined);
+    const update = vi.fn();
+    const selected = {
+      id: "selection",
+      file: new File(["content"], "file.txt"),
+      phase: "pending" as const,
+      progress: 0,
+    };
+    const input = {
+      selected,
+      session: { pasteId: "paste-000000000000001", pasteKey: {} as CryptoKey },
+      payloads: cache,
+      update,
+      dependencies: { encrypt, upload, list: async () => [] },
+    };
+
+    expect(await uploadSelectedFile(input)).toBe(false);
+    expect(cache.size).toBe(1);
+    expect(await uploadSelectedFile(input)).toBe(true);
+    expect(encrypt).toHaveBeenCalledTimes(1);
+    expect(cache.size).toBe(0);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ phase: "complete" }));
+  });
+
+  it("treats an already removed unfinished item as discarded", async () => {
+    await expect(discardUploadSession("paste", async () => {
+      throw new ApiError("Not found", 404);
+    })).resolves.toBeUndefined();
+    await expect(discardUploadSession("paste", async () => {
+      throw new ApiError("Unavailable", 503);
+    })).rejects.toMatchObject({ status: 503 });
   });
 
   it("clears every payload when an upload session ends", () => {
