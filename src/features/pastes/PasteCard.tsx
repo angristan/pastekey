@@ -21,15 +21,10 @@ import { downloadAttachment, type UnlockedAttachment } from "../../lib/attachmen
 import { decryptAttachmentMetadata } from "../../lib/crypto";
 import { formatBytes, formatDate, formatExpiry, messageOf } from "../../lib/format";
 import { itemKindOf, type StoredAttachment } from "../../lib/types";
+import { mergeShares, type GeneratedShare, type ShareSummary } from "./share-state";
 import type { UnlockedPaste } from "./types";
 
 const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
-
-type ShareSummary = {
-  id: string;
-  createdAt: number;
-  expiresAt: number | null;
-};
 
 export function PasteCard({
   paste,
@@ -44,9 +39,8 @@ export function PasteCard({
   const [shares, setShares] = useState<ShareSummary[] | null>(null);
   const [attachments, setAttachments] = useState<UnlockedAttachment[] | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
-  const [newShareUrl, setNewShareUrl] = useState<string | null>(null);
+  const [generatedShares, setGeneratedShares] = useState<GeneratedShare[]>([]);
   const [copiedPaste, setCopiedPaste] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [loadingShares, setLoadingShares] = useState(false);
@@ -106,10 +100,13 @@ export function PasteCard({
     setPanelError(null);
     setSharing(true);
     try {
+      const existing = shares ?? await loadShares();
       const created = await onShare();
-      setShares((current) => [created.share, ...(current ?? [])]);
-      setNewShareUrl(created.url);
-      setCopiedLink(false);
+      setShares(mergeShares([created.share], existing));
+      setGeneratedShares((current) => [
+        { shareId: created.share.id, url: created.url, copied: false },
+        ...current,
+      ]);
     } catch (cause) {
       setPanelError(messageOf(cause));
     } finally {
@@ -117,11 +114,12 @@ export function PasteCard({
     }
   }
 
-  async function copyShareLink() {
-    if (!newShareUrl) return;
+  async function copyShareLink(generated: GeneratedShare) {
     try {
-      await navigator.clipboard.writeText(newShareUrl);
-      setCopiedLink(true);
+      await navigator.clipboard.writeText(generated.url);
+      setGeneratedShares((current) => current.map((share) =>
+        share.shareId === generated.shareId ? { ...share, copied: true } : share,
+      ));
     } catch (cause) {
       setPanelError(messageOf(cause));
     }
@@ -134,7 +132,7 @@ export function PasteCard({
     try {
       await api<void>(`/api/pastes/${paste.stored.id}/shares/${id}`, { method: "DELETE" });
       setShares((current) => current?.filter((share) => share.id !== id) ?? []);
-      if (newShareUrl?.includes(`/s/${id}#`)) setNewShareUrl(null);
+      setGeneratedShares((current) => current.filter(({ shareId }) => shareId !== id));
     } catch (cause) {
       setPanelError(messageOf(cause));
     } finally {
@@ -279,22 +277,30 @@ export function PasteCard({
             <strong>Encrypted share links</strong>
             <span>Existing secrets aren’t stored, so links can be revoked but not shown again.</span>
           </div>
-          {newShareUrl && (
-            <div className="new-share-link">
-              <label htmlFor={`new-share-${paste.stored.id}`}>New link — copy it now</label>
-              <div>
-                <input
-                  id={`new-share-${paste.stored.id}`}
-                  readOnly
-                  value={newShareUrl}
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-                <Button size="sm" variant="primary" icon={copiedLink ? CheckIcon : CopyIcon} onClick={copyShareLink}>
-                  {copiedLink ? "Copied" : "Copy link"}
-                </Button>
+          {generatedShares.map((generated) => {
+            const inputId = `new-share-${paste.stored.id}-${generated.shareId}`;
+            return (
+              <div className="new-share-link" key={generated.shareId}>
+                <label htmlFor={inputId}>New link — copy it now</label>
+                <div>
+                  <input
+                    id={inputId}
+                    readOnly
+                    value={generated.url}
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={generated.copied ? CheckIcon : CopyIcon}
+                    onClick={() => copyShareLink(generated)}
+                  >
+                    {generated.copied ? "Copied" : "Copy link"}
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })}
           {shares.length === 0 ? <p>No active links.</p> : shares.map((share) => (
             <div className="share-row" key={share.id}>
               <code>{share.id.slice(0, 10)}…</code>
