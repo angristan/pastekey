@@ -1,8 +1,6 @@
 import { Badge, Button, LayerCard } from "@cloudflare/kumo";
 import {
   CopyIcon,
-  DownloadSimpleIcon,
-  FileIcon,
   KeyIcon,
   PaperclipIcon,
   ShareNetworkIcon,
@@ -10,10 +8,11 @@ import {
 } from "@phosphor-icons/react";
 import { useState } from "react";
 
+import { AttachmentList } from "../../components/AttachmentList";
 import { api } from "../../lib/api";
-import { downloadAttachment, type UnlockedAttachment } from "../../lib/attachments";
+import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata } from "../../lib/crypto";
-import { formatBytes, formatDate, formatExpiry, messageOf } from "../../lib/format";
+import { formatDate, formatExpiry, messageOf } from "../../lib/format";
 import type { StoredAttachment } from "../../lib/types";
 import type { UnlockedPaste } from "./types";
 
@@ -70,12 +69,8 @@ export function PasteCard({
   }
 
   async function removeFile(attachment: UnlockedAttachment) {
-    try {
-      await api<void>(`/api/pastes/${paste.stored.id}/files/${attachment.stored.id}`, { method: "DELETE" });
-      setAttachments((current) => current?.filter((item) => item.stored.id !== attachment.stored.id) ?? []);
-    } catch (cause) {
-      setPanelError(messageOf(cause));
-    }
+    await api<void>(`/api/pastes/${paste.stored.id}/files/${attachment.stored.id}`, { method: "DELETE" });
+    setAttachments((current) => current?.filter((item) => item.stored.id !== attachment.stored.id) ?? []);
   }
 
   return (
@@ -113,27 +108,13 @@ export function PasteCard({
         </div>
       )}
       {attachments && (
-        <div className="attachment-list">
-          <strong>Encrypted attachments</strong>
-          {attachments.length === 0 ? <p>No files attached.</p> : attachments.map((attachment) => (
-            <div className="attachment-row" key={attachment.stored.id}>
-              <FileIcon />
-              <span>{attachment.metadata.name}</span>
-              <small>{formatBytes(attachment.metadata.size)}</small>
-              <Button
-                size="xs"
-                icon={DownloadSimpleIcon}
-                onClick={() => downloadAttachment(
-                  `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`,
-                  attachment,
-                ).catch((cause) => setPanelError(messageOf(cause)))}
-              >
-                Download
-              </Button>
-              <Button size="xs" variant="secondary-destructive" onClick={() => removeFile(attachment)}>Delete</Button>
-            </div>
-          ))}
-        </div>
+        <AttachmentList
+          attachments={attachments}
+          downloadEndpoint={(attachment) => `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`}
+          emptyMessage="No files attached."
+          onDelete={removeFile}
+          onError={setPanelError}
+        />
       )}
       <button className="paste-preview" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
         <pre>{expanded ? paste.payload.content : preview}</pre>

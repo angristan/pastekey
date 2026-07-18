@@ -43,12 +43,13 @@ Passkey PRF ──HKDF──> passkey wrapping key
 
 ```text
 src/
-├── components/          # Shared presentation
+├── components/          # Shared presentation, including attachment rows
+├── crypto/              # Account, paste/share, attachment protocols and primitives
 ├── features/
 │   ├── auth/            # Landing, locked state, Turnstile
 │   ├── pastes/          # Dashboard, composer, paste management
 │   └── sharing/         # Public shared-paste experience
-└── lib/                 # API client, crypto, attachments, formatting, protocol types
+└── lib/                 # Stable API surface, API client, downloads, formatting, protocol types
 
 worker/
 ├── routes/              # Auth, paste, attachment, and sharing HTTP boundaries
@@ -59,7 +60,7 @@ worker/
 └── index.ts             # Composition root only
 ```
 
-Cryptography and wire-format types remain independent of React. Worker routes own HTTP concerns while reusable infrastructure stays outside route modules.
+Cryptography and wire-format types remain independent of React. Worker routes own HTTP concerns while reusable infrastructure stays outside route modules. Tests run inside the Workers runtime with isolated D1 and R2 bindings; the attachment suite exercises the authenticated upload, list, download, and cleanup lifecycle end to end.
 
 ## Develop
 

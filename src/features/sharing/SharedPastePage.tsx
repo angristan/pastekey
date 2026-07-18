@@ -3,18 +3,17 @@ import {
   ArrowSquareOutIcon,
   CheckIcon,
   CopyIcon,
-  DownloadSimpleIcon,
-  FileIcon,
   KeyIcon,
   LockKeyIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
+import { AttachmentList } from "../../components/AttachmentList";
 import { Brand, CenteredStatus, GitHubLink } from "../../components/Brand";
 import { api } from "../../lib/api";
-import { downloadAttachment, type UnlockedAttachment } from "../../lib/attachments";
+import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata, decryptSharedPaste } from "../../lib/crypto";
-import { formatBytes, formatDate, messageOf } from "../../lib/format";
+import { formatDate, messageOf } from "../../lib/format";
 import type { PastePayload, StoredShare } from "../../lib/types";
 
 export function SharedPastePage({ shareId }: { shareId: string }) {
@@ -83,26 +82,14 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
           </div>
           <pre className="shared-content"><code>{payload.content}</code></pre>
           {attachments.length > 0 && (
-            <div className="shared-attachments">
-              <strong>Attachments</strong>
-              {attachments.map((attachment) => (
-                <div className="attachment-row" key={attachment.stored.id}>
-                  <FileIcon />
-                  <span>{attachment.metadata.name}</span>
-                  <small>{formatBytes(attachment.metadata.size)}</small>
-                  <Button
-                    size="sm"
-                    icon={DownloadSimpleIcon}
-                    onClick={() => downloadAttachment(
-                      `/api/shares/${shareId}/files/${attachment.stored.id}/content`,
-                      attachment,
-                    ).catch((cause) => setError(messageOf(cause)))}
-                  >
-                    Download
-                  </Button>
-                </div>
-              ))}
-            </div>
+            <AttachmentList
+              attachments={attachments}
+              buttonSize="sm"
+              className="shared-attachments"
+              downloadEndpoint={(attachment) => `/api/shares/${shareId}/files/${attachment.stored.id}/content`}
+              onError={setError}
+              title="Attachments"
+            />
           )}
           <footer className="shared-footer">
             <span><KeyIcon /> End-to-end encrypted. Pastekey can’t read this paste.</span>
