@@ -102,6 +102,8 @@
     "MAX_FILES_PER_PASTE": "10",
     "MAX_PASTES_PER_USER": "100",
     "MAX_STORAGE_BYTES": "104857600",
+    "DELETION_QUEUE_NAME": "pastekey-deletions",
+    "DELETION_DLQ_NAME": "pastekey-deletions-dlq",
     "ORIGIN": "https://paste.stanislas.cloud",
     "RP_ID": "paste.stanislas.cloud",
     "RP_NAME": "Pastekey",

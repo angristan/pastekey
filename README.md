@@ -165,6 +165,8 @@ The supported deployment command runs type checking, the complete test suite, a 
 | `MAX_FILES_PER_PASTE` | `10` | Attachment quota per item |
 | `MAX_FILE_BYTES` | `26214400` | Maximum encrypted file size (25 MiB) |
 | `MAX_STORAGE_BYTES` | `104857600` | File storage quota per account (100 MiB) |
+| `DELETION_QUEUE_NAME` | `pastekey-deletions` | Primary ciphertext deletion queue identity |
+| `DELETION_DLQ_NAME` | `pastekey-deletions-dlq` | Deletion dead-letter queue identity |
 
 `TURNSTILE_SECRET_KEY` is the only Worker secret. Do not commit it.
 

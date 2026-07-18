@@ -15,6 +15,7 @@ import { shareRoutes } from "./routes/shares";
 import { reconcileAccountDeletions } from "./services/account-deletions";
 import { cleanupExpired } from "./services/cleanup";
 import { consumeDeletionQueue } from "./services/deletions";
+import { recordLifecycleMetrics } from "./services/lifecycle-metrics";
 import type { AppEnv, Bindings, DeletionMessage } from "./types";
 
 export { AccountDeletionWorkflow } from "./workflows/account-deletion";
@@ -81,5 +82,6 @@ export default {
   scheduled(_controller, env, context) {
     context.waitUntil(cleanupExpired(env));
     context.waitUntil(reconcileAccountDeletions(env));
+    context.waitUntil(recordLifecycleMetrics(env));
   },
 } satisfies ExportedHandler<Bindings, DeletionMessage>;

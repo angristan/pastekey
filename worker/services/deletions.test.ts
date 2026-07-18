@@ -98,6 +98,21 @@ describe("deletion queue failures", () => {
     expect(job).toEqual({ failureCycles: 1, queuedAt: null, nextAttemptAt: now + retryDelayMs(6) });
   });
 
+  it("honors deployment-configured queue names", async () => {
+    const batch = createMessageBatch<DeletionMessage>("custom-deletions", [
+      { id: "custom-message", timestamp: new Date(), attempts: 1, body: { jobId, cycle: 0 } },
+    ]);
+    const context = createExecutionContext();
+    await consumeDeletionQueue(batch, {
+      ...bindings,
+      DELETION_QUEUE_NAME: "custom-deletions",
+      DELETION_DLQ_NAME: "custom-deletions-dlq",
+    });
+    const result = await getQueueResult(batch, context);
+    expect(result.explicitAcks).toContain("custom-message");
+    expect(result.retryMessages).toHaveLength(0);
+  });
+
   it("caps poison-job retries at one cycle per day", () => {
     expect(retryDelayMs(1)).toBe(60 * 60 * 1_000);
     expect(retryDelayMs(4)).toBe(8 * 60 * 60 * 1_000);

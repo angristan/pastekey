@@ -68,8 +68,8 @@ export async function recoverStaleDeletions(db: D1Database, now = Date.now()) {
 }
 
 export async function consumeDeletionQueue(batch: MessageBatch<DeletionMessage>, env: Bindings) {
-  if (batch.queue === DELETION_DLQ_NAME) return consumeDeadLetters(batch, env);
-  if (batch.queue === DELETION_QUEUE_NAME) return consumePrimaryDeletions(batch, env);
+  if (batch.queue === (env.DELETION_DLQ_NAME ?? DELETION_DLQ_NAME)) return consumeDeadLetters(batch, env);
+  if (batch.queue === (env.DELETION_QUEUE_NAME ?? DELETION_QUEUE_NAME)) return consumePrimaryDeletions(batch, env);
 
   console.error("Received ciphertext deletion messages from an unknown queue");
   batch.retryAll({ delaySeconds: 300 });

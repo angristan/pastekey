@@ -2,6 +2,7 @@ import type { Bindings } from "../types";
 import { enqueuePendingDeletions, recoverStaleDeletions } from "./deletions";
 
 const EXPIRY_BATCH_SIZE = 100;
+const MAX_CLEANUP_BATCHES = 5;
 
 type CleanupCandidates = {
   attachmentIds: string[];
@@ -10,8 +11,11 @@ type CleanupCandidates = {
 
 export async function cleanupExpired(env: Bindings) {
   const now = Date.now();
-  const candidates = await findCleanupCandidates(env.DB, now);
-  await stageCleanupCandidates(env.DB, candidates, now);
+  for (let batch = 0; batch < MAX_CLEANUP_BATCHES; batch += 1) {
+    const candidates = await findCleanupCandidates(env.DB, now);
+    if (!candidates.attachmentIds.length && !candidates.reservationIds.length) break;
+    await stageCleanupCandidates(env.DB, candidates, now);
+  }
   await recoverStaleDeletions(env.DB, now);
   await enqueuePendingDeletions(env, now);
 }

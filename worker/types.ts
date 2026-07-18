@@ -13,6 +13,8 @@ export type Bindings = {
   MAX_FILES_PER_PASTE?: string;
   MAX_PASTES_PER_USER?: string;
   MAX_STORAGE_BYTES?: string;
+  DELETION_QUEUE_NAME?: string;
+  DELETION_DLQ_NAME?: string;
   ORIGIN?: string;
   RP_ID?: string;
   RP_NAME?: string;
