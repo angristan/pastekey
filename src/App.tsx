@@ -4,6 +4,7 @@ import {
   Button,
   Input,
   LayerCard,
+  LinkButton,
   Select,
   Textarea,
 } from "@cloudflare/kumo";
@@ -12,6 +13,7 @@ import {
   CheckIcon,
   CopyIcon,
   FingerprintIcon,
+  GithubLogoIcon,
   KeyIcon,
   LockKeyIcon,
   PlusIcon,
@@ -123,7 +125,10 @@ function Landing({
     <main className="landing shell">
       <header className="brandbar">
         <Brand />
-        <Badge>Preview</Badge>
+        <div className="header-actions">
+          <Badge>Preview</Badge>
+          <GitHubLink />
+        </div>
       </header>
 
       <section className="hero">
@@ -278,6 +283,7 @@ function Dashboard({
         <div className="header-actions">
           <span className="encrypted-state"><CheckIcon weight="bold" /> Vault unlocked</span>
           <Button size="sm" icon={KeyIcon} loading={addingPasskey} onClick={addPasskey}>Add passkey</Button>
+          <GitHubLink />
           <Button size="sm" variant="ghost" icon={SignOutIcon} onClick={onLogout}>Sign out</Button>
         </div>
       </header>
@@ -519,7 +525,10 @@ function SharedPastePage({ shareId }: { shareId: string }) {
     <main className="shared-shell">
       <header className="app-header">
         <a href="/" className="brand-link"><Brand /></a>
-        <span className="encrypted-state"><LockKeyIcon weight="fill" /> Decrypted locally</span>
+        <div className="header-actions">
+          <span className="encrypted-state"><LockKeyIcon weight="fill" /> Decrypted locally</span>
+          <GitHubLink />
+        </div>
       </header>
       {error ? (
         <LayerCard className="auth-card shared-error">
@@ -548,6 +557,20 @@ function SharedPastePage({ shareId }: { shareId: string }) {
         </LayerCard>
       )}
     </main>
+  );
+}
+
+function GitHubLink() {
+  return (
+    <LinkButton
+      href="https://github.com/angristan/pastekey"
+      external
+      size="sm"
+      variant="ghost"
+      icon={GithubLogoIcon}
+    >
+      GitHub
+    </LinkButton>
   );
 }
 
