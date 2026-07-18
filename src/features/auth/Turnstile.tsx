@@ -7,6 +7,7 @@ type TurnstileApi = {
       sitekey: string;
       theme: "auto";
       appearance: "interaction-only";
+      size: "flexible";
       callback: (token: string) => void;
       "expired-callback": () => void;
       "error-callback": () => void;
@@ -39,6 +40,7 @@ export function Turnstile({ siteKey, onToken }: { siteKey: string; onToken: (tok
         sitekey: siteKey,
         theme: "auto",
         appearance: "interaction-only",
+        size: "flexible",
         callback: (token) => onToken(token),
         "expired-callback": () => onToken(null),
         "error-callback": () => onToken(null),

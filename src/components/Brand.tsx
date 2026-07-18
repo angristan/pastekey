@@ -4,6 +4,7 @@ import { GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 export function GitHubLink() {
   return (
     <LinkButton
+      className="github-link"
       href="https://github.com/angristan/pastekey"
       external
       size="sm"
