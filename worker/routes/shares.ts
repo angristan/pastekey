@@ -3,8 +3,9 @@ import { Hono } from "hono";
 import type { ShareWrite, StoredShare } from "../../shared/protocol/pastes";
 import { OPAQUE_ID } from "../lib/config";
 import { throwUniqueConflict } from "../lib/errors";
+import { streamR2Object } from "../lib/attachments-http";
 import { normalizeExpiry, readJson, SMALL_JSON_BODY_BYTES, validOpaque } from "../lib/http";
-import { listAttachments, streamR2Object } from "../repositories/attachments";
+import { listAttachments } from "../repositories/attachments";
 import { findActiveOwnedPaste } from "../repositories/pastes";
 import { requireUser } from "../services/sessions";
 import type { AppEnv } from "../types";
@@ -92,5 +93,5 @@ shareRoutes.get("/api/shares/:shareId/files/:fileId/content", async (c) => {
     .bind(c.req.param("fileId"), c.req.param("shareId"), now, now)
     .first<{ objectKey: string }>();
   if (!attachment) return c.json({ error: "Attachment not found or share expired" }, 404);
-  return streamR2Object(c, attachment.objectKey);
+  return streamR2Object(c.env.FILES, attachment.objectKey);
 });

@@ -1,6 +1,4 @@
 import type { StoredAttachment } from "../../shared/protocol/attachments";
-import { validOpaque } from "../lib/http";
-import type { AppContext } from "../types";
 
 export const UPLOAD_RESERVATION_TTL_MS = 2 * 60 * 60 * 1_000;
 
@@ -138,37 +136,4 @@ export async function listAttachments(db: D1Database, pasteId: string) {
     .bind(pasteId)
     .all<StoredAttachment>();
   return rows.results;
-}
-
-export function readAttachmentHeaders(headers: Headers) {
-  const fields = {
-    contentIv: headers.get("X-Pastekey-Content-IV"),
-    wrappedKey: headers.get("X-Pastekey-Wrapped-Key"),
-    wrappedKeyIv: headers.get("X-Pastekey-Wrapped-Key-IV"),
-    metadataCiphertext: headers.get("X-Pastekey-Metadata"),
-    metadataIv: headers.get("X-Pastekey-Metadata-IV"),
-  };
-  if (
-    !validOpaque(fields.contentIv) ||
-    !validOpaque(fields.wrappedKey) ||
-    !validOpaque(fields.wrappedKeyIv) ||
-    !validOpaque(fields.metadataCiphertext, 20_000) ||
-    !validOpaque(fields.metadataIv)
-  ) {
-    return null;
-  }
-  return fields as Record<keyof typeof fields, string>;
-}
-
-export async function streamR2Object(c: AppContext, objectKey: string) {
-  const object = await c.env.FILES.get(objectKey);
-  if (!object) return c.json({ error: "Encrypted attachment data not found" }, 404);
-  return new Response(object.body, {
-    headers: {
-      "Cache-Control": "private, no-store",
-      "Content-Length": String(object.size),
-      "Content-Type": "application/octet-stream",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
 }

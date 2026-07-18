@@ -1,19 +1,13 @@
 import { Hono } from "hono";
 
 import { OPAQUE_ID, serviceLimits } from "../lib/config";
-import { serviceUnavailable, throwUniqueConflict } from "../lib/errors";
-import {
-  finalizeAttachment,
-  listAttachments,
-  readAttachmentHeaders,
-  reserveAttachment,
-  stageReservationDeletion,
-  streamR2Object,
-} from "../repositories/attachments";
+import { readAttachmentHeaders, streamR2Object } from "../lib/attachments-http";
+import { listAttachments } from "../repositories/attachments";
 import { findActiveOwnedPaste } from "../repositories/pastes";
+import { uploadAttachment } from "../services/attachment-upload";
 import { enqueuePendingDeletions, stageDeletion } from "../services/deletions";
 import { requireUser } from "../services/sessions";
-import type { AppContext, AppEnv } from "../types";
+import type { AppEnv } from "../types";
 
 export const attachmentRoutes = new Hono<AppEnv>();
 
@@ -38,74 +32,35 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
   const fields = readAttachmentHeaders(c.req.raw.headers);
   if (!fields) return c.json({ error: "Invalid encrypted attachment metadata" }, 400);
 
-  if (!c.req.raw.body) return c.json({ error: "Encrypted file body is required" }, 400);
+  const body = c.req.raw.body;
+  if (!body) return c.json({ error: "Encrypted file body is required" }, 400);
 
   const objectKey = `${userId}/${pasteId}/${fileId}`;
-  const reservation = { id: fileId, pasteId, ownerId: userId, objectKey, ciphertextSize: length };
-  let reserved: D1Result;
-  try {
-    reserved = await reserveAttachment(c.env.DB, reservation, limits);
-  } catch (cause) {
-    throwUniqueConflict(cause, "Attachment ID is already reserved");
-  }
-  if (!reserved.meta.changes) {
-    const [paste, identity, fileCount] = await Promise.all([
-      c.env.DB.prepare(
-        `SELECT p.id FROM pastes p JOIN users u ON u.id = p.owner_id
-         WHERE p.id = ? AND p.owner_id = ? AND u.deletion_requested_at IS NULL
-           AND (p.expires_at IS NULL OR p.expires_at > ?)`,
-      ).bind(pasteId, userId, Date.now()).first(),
-      c.env.DB.prepare(
-        `SELECT id FROM attachments WHERE id = ? OR object_key = ?
-         UNION ALL SELECT id FROM deletion_jobs WHERE id = ? OR object_key = ?
-         UNION ALL SELECT id FROM upload_reservations WHERE id = ? OR object_key = ?
-         LIMIT 1`,
-      ).bind(fileId, objectKey, fileId, objectKey, fileId, objectKey).first(),
-      c.env.DB.prepare(
-        `SELECT
-          (SELECT COUNT(*) FROM attachments WHERE paste_id = ?) +
-          (SELECT COUNT(*) FROM upload_reservations WHERE paste_id = ?) AS count`,
-      ).bind(pasteId, pasteId).first<{ count: number }>(),
-    ]);
-    if (!paste) return c.json({ error: "Item not found" }, 404);
-    if (identity) return c.json({ error: "Attachment ID is already reserved" }, 409);
-    if ((fileCount?.count ?? 0) >= limits.maxFilesPerPaste) {
+  const outcome = await uploadAttachment(c.env, {
+    pasteId,
+    fileId,
+    ownerId: userId,
+    objectKey,
+    ciphertextSize: length,
+    body,
+    headers: fields,
+    limits,
+  }, (promise) => c.executionCtx.waitUntil(promise));
+
+  switch (outcome.status) {
+    case "created":
+      return c.json({ id: fileId, createdAt: outcome.createdAt }, 201);
+    case "item-not-found":
+      return c.json({ error: "Item not found" }, 404);
+    case "identity-conflict":
+      return c.json({ error: "Attachment ID is already reserved" }, 409);
+    case "file-limit":
       return c.json({ error: "File limit reached for this item" }, 413);
-    }
-    return c.json({ error: "Account storage quota exceeded" }, 413);
+    case "storage-limit":
+      return c.json({ error: "Account storage quota exceeded" }, 413);
+    case "item-unavailable":
+      return c.json({ error: "Item is no longer available" }, 409);
   }
-
-  try {
-    await c.env.FILES.put(objectKey, c.req.raw.body, {
-      httpMetadata: { contentType: "application/octet-stream" },
-    });
-  } catch (cause) {
-    await cleanupRejectedUpload(c, fileId, objectKey);
-    throw serviceUnavailable("Encrypted attachment upload failed", cause);
-  }
-
-  const now = Date.now();
-  let finalized: D1Result;
-  try {
-    finalized = await finalizeAttachment(c.env.DB, {
-      ...reservation,
-      contentIv: fields.contentIv,
-      wrappedKey: fields.wrappedKey,
-      wrappedKeyIv: fields.wrappedKeyIv,
-      metadataCiphertext: fields.metadataCiphertext,
-      metadataIv: fields.metadataIv,
-      createdAt: now,
-    });
-  } catch (cause) {
-    await cleanupRejectedUpload(c, fileId, objectKey);
-    throwUniqueConflict(cause, "Attachment could not be saved");
-  }
-  if (!finalized.meta.changes) {
-    await cleanupRejectedUpload(c, fileId, objectKey);
-    return c.json({ error: "Item is no longer available" }, 409);
-  }
-
-  return c.json({ id: fileId, createdAt: now }, 201);
 });
 
 attachmentRoutes.get("/api/pastes/:pasteId/files/:fileId/content", requireUser, async (c) => {
@@ -121,7 +76,7 @@ attachmentRoutes.get("/api/pastes/:pasteId/files/:fileId/content", requireUser, 
     .bind(c.req.param("fileId"), pasteId, ownerId)
     .first<{ objectKey: string }>();
   if (!attachment) return c.json({ error: "Attachment not found" }, 404);
-  return streamR2Object(c, attachment.objectKey);
+  return streamR2Object(c.env.FILES, attachment.objectKey);
 });
 
 attachmentRoutes.delete("/api/pastes/:pasteId/files/:fileId", requireUser, async (c) => {
@@ -149,15 +104,3 @@ attachmentRoutes.delete("/api/pastes/:pasteId/files/:fileId", requireUser, async
   );
   return c.body(null, 204);
 });
-
-async function cleanupRejectedUpload(c: AppContext, reservationId: string, objectKey: string) {
-  // A failed or ambiguous R2 PUT may still have committed. Delete directly while the
-  // request is alive and retain the durable outbox path for crash recovery.
-  await Promise.allSettled([
-    c.env.FILES.delete(objectKey),
-    stageReservationDeletion(c.env.DB, reservationId),
-  ]);
-  c.executionCtx.waitUntil(
-    enqueuePendingDeletions(c.env).catch(() => console.error("Could not dispatch rejected upload deletion")),
-  );
-}
