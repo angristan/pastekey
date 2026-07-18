@@ -24,10 +24,13 @@ type PrfOutputs = {
   };
 };
 
-export async function registerPasskey(existingAccountKey?: CryptoKey) {
+export async function registerPasskey(existingAccountKey?: CryptoKey, turnstileToken?: string) {
   assertPasskeySupport();
   const endpoint = existingAccountKey ? "/api/auth/passkeys/options" : "/api/auth/register/options";
-  const options = await api<PublicKeyCredentialCreationOptionsJSON>(endpoint, { method: "POST" });
+  const options = await api<PublicKeyCredentialCreationOptionsJSON>(endpoint, {
+    method: "POST",
+    ...jsonBody(existingAccountKey ? {} : { turnstileToken }),
+  });
   const credential = await navigator.credentials.create({ publicKey: creationOptions(options) });
   if (!(credential instanceof PublicKeyCredential)) throw new Error("Passkey creation was canceled");
 

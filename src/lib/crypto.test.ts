@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   createShareEnvelope,
+  decryptAttachmentContent,
+  decryptAttachmentMetadata,
   decryptOwnedPaste,
   decryptSharedPaste,
   derivePasskeyWrappingKey,
+  encryptAttachment,
   encryptNewPaste,
   generateAccountKey,
   normalizePrfOutput,
@@ -13,7 +16,7 @@ import {
   unwrapAccountKey,
   wrapAccountKey,
 } from "./crypto";
-import type { PastePayload, StoredPaste, StoredShare } from "./types";
+import type { PastePayload, StoredAttachment, StoredPaste, StoredShare } from "./types";
 
 const payload: PastePayload = {
   title: "Production notes",
@@ -64,10 +67,34 @@ describe("Pastekey envelope encryption", () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       expiresAt: null,
+      attachments: [],
     };
 
-    await expect(decryptSharedPaste(shared, share.secret)).resolves.toEqual(payload);
+    await expect(decryptSharedPaste(shared, share.secret)).resolves.toMatchObject({ payload });
     await expect(decryptSharedPaste(shared, randomId(32))).rejects.toThrow();
+  });
+
+  it("encrypts file bytes and metadata under a paste key", async () => {
+    const accountKey = await generateAccountKey();
+    const encrypted = await encryptNewPaste(accountKey, payload, null);
+    const file = new File(["private attachment"], "secret.txt", { type: "text/plain" });
+    const prepared = await encryptAttachment(encrypted.pasteKey, encrypted.write.id, file);
+    const stored: StoredAttachment = {
+      id: prepared.id,
+      pasteId: encrypted.write.id,
+      ciphertextSize: prepared.body.byteLength,
+      contentIv: prepared.headers["X-Pastekey-Content-IV"],
+      wrappedKey: prepared.headers["X-Pastekey-Wrapped-Key"],
+      wrappedKeyIv: prepared.headers["X-Pastekey-Wrapped-Key-IV"],
+      metadataCiphertext: prepared.headers["X-Pastekey-Metadata"],
+      metadataIv: prepared.headers["X-Pastekey-Metadata-IV"],
+      createdAt: Date.now(),
+    };
+
+    const unlocked = await decryptAttachmentMetadata(encrypted.pasteKey, stored);
+    expect(unlocked.metadata).toEqual({ name: "secret.txt", type: "text/plain", size: 18 });
+    const plaintext = await decryptAttachmentContent(unlocked.fileKey, stored, prepared.body.buffer);
+    expect(new TextDecoder().decode(plaintext)).toBe("private attachment");
   });
 
   it("does not open one paste with another paste envelope", async () => {

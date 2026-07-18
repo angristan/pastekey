@@ -12,10 +12,13 @@ import {
   ArrowSquareOutIcon,
   CheckIcon,
   CopyIcon,
+  DownloadSimpleIcon,
+  FileIcon,
   FingerprintIcon,
   GithubLogoIcon,
   KeyIcon,
   LockKeyIcon,
+  PaperclipIcon,
   PlusIcon,
   ShareNetworkIcon,
   SignOutIcon,
@@ -26,17 +29,35 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { api, jsonBody } from "./lib/api";
 import {
   createShareEnvelope,
+  decryptAttachmentContent,
+  decryptAttachmentMetadata,
   decryptOwnedPaste,
   decryptSharedPaste,
+  encryptAttachment,
   encryptNewPaste,
 } from "./lib/crypto";
 import { registerPasskey, unlockWithPasskey } from "./lib/passkeys";
-import type { MeResponse, PastePayload, StoredPaste, StoredShare } from "./lib/types";
+import type {
+  AppConfig,
+  AttachmentMetadata,
+  MeResponse,
+  PastePayload,
+  StoredAttachment,
+  StoredPaste,
+  StoredShare,
+} from "./lib/types";
+import { Turnstile } from "./Turnstile";
 
 type UnlockedPaste = {
   stored: StoredPaste;
   payload: PastePayload;
   pasteKey: CryptoKey;
+};
+
+type UnlockedAttachment = {
+  stored: StoredAttachment;
+  metadata: AttachmentMetadata;
+  fileKey: CryptoKey;
 };
 
 type Expiry = "hour" | "day" | "week" | "never";
@@ -49,6 +70,7 @@ export default function App() {
 
 function VaultApp() {
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [config, setConfig] = useState<AppConfig | null>(null);
   const [accountKey, setAccountKey] = useState<CryptoKey | null>(null);
   const [busy, setBusy] = useState<"register" | "unlock" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,14 +80,17 @@ function VaultApp() {
   }, []);
 
   useEffect(() => {
-    refreshMe().catch((cause) => setError(messageOf(cause)));
+    Promise.all([
+      refreshMe(),
+      api<AppConfig>("/api/config").then(setConfig),
+    ]).catch((cause) => setError(messageOf(cause)));
   }, [refreshMe]);
 
-  async function authenticate(mode: "register" | "unlock") {
+  async function authenticate(mode: "register" | "unlock", turnstileToken?: string) {
     setBusy(mode);
     setError(null);
     try {
-      const result = mode === "register" ? await registerPasskey() : await unlockWithPasskey();
+      const result = mode === "register" ? await registerPasskey(undefined, turnstileToken) : await unlockWithPasskey();
       setAccountKey(result.accountKey);
       await refreshMe();
     } catch (cause) {
@@ -81,7 +106,7 @@ function VaultApp() {
     setMe({ authenticated: false });
   }
 
-  if (!me) {
+  if (!me || !config) {
     return <CenteredStatus label="Opening Pastekey…" />;
   }
 
@@ -89,8 +114,9 @@ function VaultApp() {
     return (
       <Landing
         busy={busy}
+        config={config}
         error={error}
-        onRegister={() => authenticate("register")}
+        onRegister={(token) => authenticate("register", token)}
         onUnlock={() => authenticate("unlock")}
       />
     );
@@ -107,20 +133,31 @@ function VaultApp() {
     );
   }
 
-  return <Dashboard accountKey={accountKey} me={me} onLogout={logout} onRefreshMe={refreshMe} />;
+  return <Dashboard accountKey={accountKey} config={config} me={me} onLogout={logout} onRefreshMe={refreshMe} />;
 }
 
 function Landing({
   busy,
+  config,
   error,
   onRegister,
   onUnlock,
 }: {
   busy: "register" | "unlock" | null;
+  config: AppConfig;
   error: string | null;
-  onRegister: () => void;
+  onRegister: (token?: string) => Promise<void>;
   onUnlock: () => void;
 }) {
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [challengeVersion, setChallengeVersion] = useState(0);
+
+  async function register() {
+    await onRegister(turnstileToken ?? undefined);
+    setTurnstileToken(null);
+    setChallengeVersion((value) => value + 1);
+  }
+
   return (
     <main className="landing shell">
       <header className="brandbar">
@@ -138,8 +175,18 @@ function Landing({
           <p className="hero-description">
             An end-to-end encrypted pastebin unlocked by your passkey. Cloudflare stores ciphertext—not your words.
           </p>
+          {config.turnstileSiteKey && (
+            <Turnstile key={challengeVersion} siteKey={config.turnstileSiteKey} onToken={setTurnstileToken} />
+          )}
           <div className="hero-actions">
-            <Button variant="primary" size="lg" icon={PlusIcon} loading={busy === "register"} onClick={onRegister}>
+            <Button
+              variant="primary"
+              size="lg"
+              icon={PlusIcon}
+              loading={busy === "register"}
+              disabled={Boolean(config.turnstileSiteKey && !turnstileToken)}
+              onClick={register}
+            >
               Create a vault
             </Button>
             <Button size="lg" icon={FingerprintIcon} loading={busy === "unlock"} onClick={onUnlock}>
@@ -200,11 +247,13 @@ function LockedVault({
 
 function Dashboard({
   accountKey,
+  config,
   me,
   onLogout,
   onRefreshMe,
 }: {
   accountKey: CryptoKey;
+  config: AppConfig;
   me: MeResponse;
   onLogout: () => Promise<void>;
   onRefreshMe: () => Promise<void>;
@@ -312,6 +361,7 @@ function Dashboard({
       {showComposer && (
         <PasteComposer
           accountKey={accountKey}
+          limits={config.limits}
           onCreated={async () => {
             setShowComposer(false);
             setNotice("Paste encrypted and saved.");
@@ -343,10 +393,12 @@ function Dashboard({
 
 function PasteComposer({
   accountKey,
+  limits,
   onCreated,
   onCancel,
 }: {
   accountKey: CryptoKey;
+  limits: AppConfig["limits"];
   onCreated: () => Promise<void>;
   onCancel: () => void;
 }) {
@@ -354,23 +406,45 @@ function PasteComposer({
   const [content, setContent] = useState("");
   const [language, setLanguage] = useState("text");
   const [expiry, setExpiry] = useState<Expiry>("week");
+  const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!content.trim()) return setError("Paste content cannot be empty.");
+    if (!content.trim() && files.length === 0) return setError("Add paste content or at least one file.");
     setSaving(true);
     setError(null);
+    let createdPasteId: string | null = null;
     try {
+      setProgress("Encrypting paste…");
       const encrypted = await encryptNewPaste(
         accountKey,
         { title: title.trim() || "Untitled paste", content, language },
         expiryTimestamp(expiry),
       );
       await api("/api/pastes", { method: "POST", ...jsonBody(encrypted.write) });
+      createdPasteId = encrypted.write.id;
+
+      for (const [index, file] of files.entries()) {
+        setProgress(`Encrypting file ${index + 1} of ${files.length}…`);
+        const attachment = await encryptAttachment(encrypted.pasteKey, encrypted.write.id, file);
+        setProgress(`Uploading file ${index + 1} of ${files.length}…`);
+        await api(`/api/pastes/${encrypted.write.id}/files/${attachment.id}`, {
+          method: "PUT",
+          body: attachment.body,
+          headers: attachment.headers,
+        });
+      }
+
+      setProgress(null);
       await onCreated();
     } catch (cause) {
+      if (createdPasteId) {
+        await api<void>(`/api/pastes/${createdPasteId}`, { method: "DELETE" }).catch(() => undefined);
+      }
+      setProgress(null);
       setError(messageOf(cause));
     } finally {
       setSaving(false);
@@ -414,11 +488,47 @@ function PasteComposer({
           spellCheck={false}
           maxLength={500_000}
         />
+        <div className="file-picker">
+          <label className="file-picker-button">
+            <PaperclipIcon />
+            Add encrypted files
+            <input
+              type="file"
+              multiple
+              onChange={(event) => {
+                const selected = Array.from(event.target.files ?? []);
+                if (selected.length > limits.maxFilesPerPaste) {
+                  setError(`Choose at most ${limits.maxFilesPerPaste} files.`);
+                  return;
+                }
+                const invalid = selected.find((file) => file.size === 0 || file.size > limits.maxFileBytes);
+                if (invalid) {
+                  setError(`${invalid.name} must be between 1 byte and ${formatBytes(limits.maxFileBytes)}.`);
+                  return;
+                }
+                setError(null);
+                setFiles(selected);
+              }}
+            />
+          </label>
+          <span>Up to {limits.maxFilesPerPaste} files · {formatBytes(limits.maxFileBytes)} each</span>
+        </div>
+        {files.length > 0 && (
+          <div className="selected-files">
+            {files.map((file, index) => (
+              <div key={`${file.name}:${file.size}:${index}`}>
+                <FileIcon />
+                <span>{file.name}</span>
+                <small>{formatBytes(file.size)}</small>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="composer-actions">
           <span><LockKeyIcon /> Encrypted with a new per-paste key</span>
           <div>
             <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
-            <Button type="submit" variant="primary" loading={saving}>Encrypt & save</Button>
+            <Button type="submit" variant="primary" loading={saving}>{progress ?? "Encrypt & save"}</Button>
           </div>
         </div>
       </form>
@@ -429,6 +539,7 @@ function PasteComposer({
 function PasteCard({ paste, onShare, onDelete }: { paste: UnlockedPaste; onShare: () => void; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [shares, setShares] = useState<{ id: string; createdAt: number; expiresAt: number | null }[] | null>(null);
+  const [attachments, setAttachments] = useState<UnlockedAttachment[] | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const preview = paste.payload.content.split("\n").slice(0, 4).join("\n");
 
@@ -454,6 +565,30 @@ function PasteCard({ paste, onShare, onDelete }: { paste: UnlockedPaste; onShare
     }
   }
 
+  async function toggleFiles() {
+    if (attachments) return setAttachments(null);
+    setShareError(null);
+    try {
+      const result = await api<{ attachments: StoredAttachment[] }>(`/api/pastes/${paste.stored.id}/files`);
+      setAttachments(
+        await Promise.all(
+          result.attachments.map(async (stored) => ({ stored, ...(await decryptAttachmentMetadata(paste.pasteKey, stored)) })),
+        ),
+      );
+    } catch (cause) {
+      setShareError(messageOf(cause));
+    }
+  }
+
+  async function removeFile(attachment: UnlockedAttachment) {
+    try {
+      await api<void>(`/api/pastes/${paste.stored.id}/files/${attachment.stored.id}`, { method: "DELETE" });
+      setAttachments((current) => current?.filter((item) => item.stored.id !== attachment.stored.id) ?? []);
+    } catch (cause) {
+      setShareError(messageOf(cause));
+    }
+  }
+
   return (
     <LayerCard className="paste-card">
       <div className="paste-card-head">
@@ -466,6 +601,7 @@ function PasteCard({ paste, onShare, onDelete }: { paste: UnlockedPaste; onShare
         </div>
         <div className="paste-actions">
           <Button size="sm" icon={ShareNetworkIcon} onClick={onShare}>Share</Button>
+          <Button size="sm" variant="ghost" icon={PaperclipIcon} onClick={toggleFiles}>Files</Button>
           <Button size="sm" variant="ghost" icon={KeyIcon} onClick={toggleShares}>Links</Button>
           <Button size="sm" variant="ghost" icon={CopyIcon} onClick={() => navigator.clipboard.writeText(paste.payload.content)}>Copy</Button>
           <Button size="sm" shape="square" variant="ghost" icon={TrashIcon} aria-label="Delete paste" onClick={onDelete} />
@@ -487,6 +623,29 @@ function PasteCard({ paste, onShare, onDelete }: { paste: UnlockedPaste; onShare
           ))}
         </div>
       )}
+      {attachments && (
+        <div className="attachment-list">
+          <strong>Encrypted attachments</strong>
+          {attachments.length === 0 ? <p>No files attached.</p> : attachments.map((attachment) => (
+            <div className="attachment-row" key={attachment.stored.id}>
+              <FileIcon />
+              <span>{attachment.metadata.name}</span>
+              <small>{formatBytes(attachment.metadata.size)}</small>
+              <Button
+                size="xs"
+                icon={DownloadSimpleIcon}
+                onClick={() => downloadAttachment(
+                  `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`,
+                  attachment,
+                ).catch((cause) => setShareError(messageOf(cause)))}
+              >
+                Download
+              </Button>
+              <Button size="xs" variant="secondary-destructive" onClick={() => removeFile(attachment)}>Delete</Button>
+            </div>
+          ))}
+        </div>
+      )}
       <button className="paste-preview" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
         <pre>{expanded ? paste.payload.content : preview}</pre>
         {!expanded && paste.payload.content.split("\n").length > 4 && <span>Show all</span>}
@@ -499,6 +658,7 @@ function SharedPastePage({ shareId }: { shareId: string }) {
   const secret = window.location.hash.slice(1);
   const [payload, setPayload] = useState<PastePayload | null>(null);
   const [metadata, setMetadata] = useState<StoredShare | null>(null);
+  const [attachments, setAttachments] = useState<UnlockedAttachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -510,7 +670,16 @@ function SharedPastePage({ shareId }: { shareId: string }) {
     api<StoredShare>(`/api/shares/${shareId}`)
       .then(async (stored) => {
         setMetadata(stored);
-        setPayload(await decryptSharedPaste(stored, secret));
+        const unlocked = await decryptSharedPaste(stored, secret);
+        setPayload(unlocked.payload);
+        setAttachments(
+          await Promise.all(
+            stored.attachments.map(async (attachment) => ({
+              stored: attachment,
+              ...(await decryptAttachmentMetadata(unlocked.pasteKey, attachment)),
+            })),
+          ),
+        );
       })
       .catch((cause) => setError(messageOf(cause)));
   }, [secret, shareId]);
@@ -550,6 +719,28 @@ function SharedPastePage({ shareId }: { shareId: string }) {
             <Button variant="primary" icon={copied ? CheckIcon : CopyIcon} onClick={copy}>{copied ? "Copied" : "Copy"}</Button>
           </div>
           <pre className="shared-content"><code>{payload.content}</code></pre>
+          {attachments.length > 0 && (
+            <div className="shared-attachments">
+              <strong>Attachments</strong>
+              {attachments.map((attachment) => (
+                <div className="attachment-row" key={attachment.stored.id}>
+                  <FileIcon />
+                  <span>{attachment.metadata.name}</span>
+                  <small>{formatBytes(attachment.metadata.size)}</small>
+                  <Button
+                    size="sm"
+                    icon={DownloadSimpleIcon}
+                    onClick={() => downloadAttachment(
+                      `/api/shares/${shareId}/files/${attachment.stored.id}/content`,
+                      attachment,
+                    ).catch((cause) => setError(messageOf(cause)))}
+                  >
+                    Download
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
           <footer className="shared-footer">
             <span><KeyIcon /> End-to-end encrypted. Pastekey can’t read this paste.</span>
             <a href="/" className="text-link">Create your own <ArrowSquareOutIcon /></a>
@@ -599,6 +790,31 @@ function expiryTimestamp(expiry: Expiry) {
     week: 7 * 24 * 60 * 60 * 1000,
   };
   return expiry === "never" ? null : Date.now() + durations[expiry];
+}
+
+async function downloadAttachment(endpoint: string, attachment: UnlockedAttachment) {
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? `Download failed (${response.status})`);
+  }
+  const plaintext = await decryptAttachmentContent(
+    attachment.fileKey,
+    attachment.stored,
+    await response.arrayBuffer(),
+  );
+  const url = URL.createObjectURL(new Blob([plaintext], { type: attachment.metadata.type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = attachment.metadata.name;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatDate(timestamp: number) {

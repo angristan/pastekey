@@ -1,8 +1,16 @@
-import type { PastePayload, StoredPaste, StoredShare, WrappedKey } from "./types";
+import type {
+  AttachmentMetadata,
+  PastePayload,
+  StoredAttachment,
+  StoredPaste,
+  StoredShare,
+  WrappedKey,
+} from "./types";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const AES_GCM = { name: "AES-GCM", length: 256 } as const;
+const PASTE_KEY_USAGES: KeyUsage[] = ["encrypt", "decrypt", "wrapKey", "unwrapKey"];
 
 export const PRF_INPUT = encoder.encode("pastekey/passkey-prf/v1");
 
@@ -50,7 +58,7 @@ export async function encryptNewPaste(
   expiresAt: number | null,
 ) {
   const id = randomId();
-  const pasteKey = await crypto.subtle.generateKey(AES_GCM, true, ["encrypt", "decrypt"]);
+  const pasteKey = await crypto.subtle.generateKey(AES_GCM, true, PASTE_KEY_USAGES);
   const encrypted = await encryptPayload(pasteKey, id, payload);
   const wrapped = await wrapKey(pasteKey, accountKey, `pastekey/owner/${id}/v1`);
 
@@ -90,6 +98,7 @@ export async function decryptOwnedPaste(accountKey: CryptoKey, stored: StoredPas
     { ciphertext: stored.wrappedKey, iv: stored.wrappedKeyIv },
     accountKey,
     `pastekey/owner/${stored.id}/v1`,
+    PASTE_KEY_USAGES,
   );
   const payload = await decryptPayload(pasteKey, stored.id, stored.ciphertext, stored.contentIv);
   return { pasteKey, payload };
@@ -121,8 +130,76 @@ export async function decryptSharedPaste(stored: StoredShare, encodedSecret: str
     { ciphertext: stored.wrappedKey, iv: stored.wrappedKeyIv },
     shareKey,
     `pastekey/share/${stored.id}/${stored.pasteId}/v1`,
+    PASTE_KEY_USAGES,
   );
-  return decryptPayload(pasteKey, stored.pasteId, stored.ciphertext, stored.contentIv);
+  const payload = await decryptPayload(pasteKey, stored.pasteId, stored.ciphertext, stored.contentIv);
+  return { pasteKey, payload };
+}
+
+export async function encryptAttachment(pasteKey: CryptoKey, pasteId: string, file: File) {
+  const id = randomId();
+  const fileKey = await crypto.subtle.generateKey(AES_GCM, true, ["encrypt", "decrypt"]);
+  const wrapped = await wrapKey(fileKey, pasteKey, `pastekey/file/${id}/${pasteId}/v1`);
+  const metadata = await encryptBytes(
+    fileKey,
+    encoder.encode(JSON.stringify({ name: file.name, type: file.type || "application/octet-stream", size: file.size })),
+    `pastekey/file-metadata/${id}/${pasteId}/v1`,
+  );
+  const content = await encryptBytes(
+    fileKey,
+    new Uint8Array(await file.arrayBuffer()),
+    `pastekey/file-content/${id}/${pasteId}/v1`,
+  );
+
+  return {
+    id,
+    body: content.ciphertext,
+    headers: {
+      "X-Pastekey-Content-IV": content.iv,
+      "X-Pastekey-Wrapped-Key": wrapped.ciphertext,
+      "X-Pastekey-Wrapped-Key-IV": wrapped.iv,
+      "X-Pastekey-Metadata": metadata.encodedCiphertext,
+      "X-Pastekey-Metadata-IV": metadata.iv,
+    },
+  };
+}
+
+export async function decryptAttachmentMetadata(pasteKey: CryptoKey, attachment: StoredAttachment) {
+  const fileKey = await unwrapKey(
+    { ciphertext: attachment.wrappedKey, iv: attachment.wrappedKeyIv },
+    pasteKey,
+    `pastekey/file/${attachment.id}/${attachment.pasteId}/v1`,
+  );
+  const plaintext = await decryptBytes(
+    fileKey,
+    fromBase64Url(attachment.metadataCiphertext),
+    attachment.metadataIv,
+    `pastekey/file-metadata/${attachment.id}/${attachment.pasteId}/v1`,
+  );
+  const metadata = JSON.parse(decoder.decode(plaintext)) as Partial<AttachmentMetadata>;
+  if (
+    typeof metadata.name !== "string" ||
+    typeof metadata.type !== "string" ||
+    typeof metadata.size !== "number" ||
+    !Number.isSafeInteger(metadata.size) ||
+    metadata.size < 0
+  ) {
+    throw new Error("Invalid encrypted attachment metadata");
+  }
+  return { fileKey, metadata: metadata as AttachmentMetadata };
+}
+
+export async function decryptAttachmentContent(
+  fileKey: CryptoKey,
+  attachment: StoredAttachment,
+  ciphertext: ArrayBuffer,
+) {
+  return decryptBytes(
+    fileKey,
+    new Uint8Array(ciphertext),
+    attachment.contentIv,
+    `pastekey/file-content/${attachment.id}/${attachment.pasteId}/v1`,
+  );
 }
 
 async function deriveShareKey(secret: Uint8Array<ArrayBuffer>, shareId: string, pasteId: string) {
@@ -138,6 +215,41 @@ async function deriveShareKey(secret: Uint8Array<ArrayBuffer>, shareId: string, 
     AES_GCM,
     false,
     ["wrapKey", "unwrapKey"],
+  );
+}
+
+async function encryptBytes(key: CryptoKey, plaintext: Uint8Array<ArrayBuffer>, additionalData: string) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: encoder.encode(additionalData) },
+      key,
+      plaintext,
+    ),
+  );
+  return {
+    ciphertext,
+    encodedCiphertext: toBase64Url(ciphertext),
+    iv: toBase64Url(iv),
+  };
+}
+
+async function decryptBytes(
+  key: CryptoKey,
+  ciphertext: Uint8Array<ArrayBuffer>,
+  encodedIv: string,
+  additionalData: string,
+) {
+  return new Uint8Array(
+    await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: fromBase64Url(encodedIv),
+        additionalData: encoder.encode(additionalData),
+      },
+      key,
+      ciphertext,
+    ),
   );
 }
 

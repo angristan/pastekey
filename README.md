@@ -15,21 +15,25 @@ Passkey PRF ──HKDF──> passkey wrapping key
                          ▼
                  per-paste random key ──AES-GCM──> paste
                          │
+                         ├── wraps independent attachment keys ──AES-GCM──> R2 ciphertext
                          └── wrapped by a share key from the URL #fragment
 ```
 
 - Every paste gets an independent random AES-256-GCM key.
 - The account key is wrapped independently for each passkey using WebAuthn PRF output.
 - The title, format, and content are encrypted together.
+- Every attachment has an independent key; filename, MIME type, and bytes are encrypted locally before R2 upload.
 - Share links contain a random secret after `#`; URL fragments are not sent to the server.
 - Revoking a share deletes its wrapped paste-key envelope. It cannot revoke plaintext already copied by a recipient.
-- D1 still exposes metadata: account/paste counts, timestamps, approximate ciphertext sizes, expiry, and access metadata.
+- D1 and R2 still expose metadata: account/paste/file counts, timestamps, ciphertext sizes, expiry, and access metadata.
 - Losing every passkey means losing the vault. There is no server-side reset in this version.
 
 ## Stack
 
 - Cloudflare Worker + Hono API
-- Cloudflare D1
+- Cloudflare D1 metadata + R2 encrypted attachment storage
+- Workers Rate Limiting + Turnstile registration protection
+- Hourly cleanup for expired D1 records and R2 objects
 - React + Vite + Cloudflare Vite plugin
 - Cloudflare Kumo components
 - SimpleWebAuthn server verification
@@ -49,13 +53,17 @@ WebAuthn works on `localhost`. The local D1 database is stored under `.wrangler/
 
 ## Deploy
 
-Create a D1 database, put its `database_id` in `wrangler.jsonc`, configure your route, `RP_ID`, and `ORIGIN`, then deploy:
+Create D1 and R2 resources, put their bindings in `wrangler.jsonc`, configure your route, WebAuthn RP, limits, and Turnstile widget, then deploy:
 
 ```bash
 bunx wrangler d1 create pastekey
+bunx wrangler r2 bucket create pastekey-files
+bunx wrangler secret put TURNSTILE_SECRET_KEY
 bun run db:migrate:remote
 bun run deploy
 ```
+
+The Turnstile site key is a public `vars` value; its secret must only be stored with `wrangler secret put`. Default quotas are 100 pastes, 10 files per paste, 25 MiB per file, and 100 MiB of attachments per account.
 
 This repository is configured for `paste.stanislas.cloud`; forks must use their own D1 database and domain. Once passkeys exist for an RP ID, changing it requires registering new credentials.
 

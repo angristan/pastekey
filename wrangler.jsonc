@@ -21,9 +21,35 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "pastekey-files"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "86031401",
+      "simple": { "limit": 20, "period": 60 }
+    },
+    {
+      "name": "WRITE_RATE_LIMITER",
+      "namespace_id": "86031402",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
+  "triggers": {
+    "crons": ["17 * * * *"]
+  },
   "vars": {
+    "MAX_FILE_BYTES": "26214400",
+    "MAX_FILES_PER_PASTE": "10",
+    "MAX_PASTES_PER_USER": "100",
+    "MAX_STORAGE_BYTES": "104857600",
     "ORIGIN": "https://paste.stanislas.cloud",
     "RP_ID": "paste.stanislas.cloud",
-    "RP_NAME": "Pastekey"
+    "RP_NAME": "Pastekey",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAD4jwy877w3-m9Q1"
   }
 }

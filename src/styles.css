@@ -88,7 +88,8 @@ a { color: inherit; }
   line-height: 1.6;
 }
 
-.hero-actions { display: flex; gap: 12px; margin: 34px 0 22px; flex-wrap: wrap; }
+.hero-actions { display: flex; gap: 12px; margin: 18px 0 22px; flex-wrap: wrap; }
+.turnstile { min-height: 65px; margin-top: 28px; }
 .hero-copy > [role="alert"] { max-width: 610px; }
 
 .security-card {
@@ -221,6 +222,27 @@ a { color: inherit; }
   font: 14px/1.65 var(--mono) !important;
   resize: vertical;
 }
+.file-picker { display: flex; align-items: center; gap: 12px; }
+.file-picker > span { color: var(--muted); font-size: 11px; }
+.file-picker-button {
+  height: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+.file-picker-button:hover { background: #f0eee7; }
+.file-picker-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.selected-files { display: grid; gap: 7px; }
+.selected-files > div { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; background: #f0eee7; }
+.selected-files span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.selected-files small { color: var(--muted); }
 .composer-actions { border-top: 1px solid var(--line); padding-top: 18px; }
 .composer-actions > span { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .composer-actions > div { display: flex; gap: 8px; }
@@ -240,6 +262,12 @@ a { color: inherit; }
 .share-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; }
 .share-row code { font: 11px var(--mono); }
 .share-row > span { color: var(--muted); font-size: 11px; }
+.attachment-list, .shared-attachments { padding: 16px 22px; display: grid; gap: 10px; border-top: 1px solid var(--line); background: #f7f5ef; }
+.attachment-list > strong, .shared-attachments > strong { font-size: 13px; }
+.attachment-list > p { margin: 0; color: var(--muted); font-size: 11px; }
+.attachment-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; }
+.attachment-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.attachment-row > small { color: var(--muted); white-space: nowrap; }
 .paste-preview {
   width: 100%;
   padding: 18px 22px;
@@ -269,6 +297,8 @@ a { color: inherit; }
 .shared-heading h1 { margin: 0; font-size: clamp(32px, 5vw, 52px); letter-spacing: -.055em; }
 .shared-heading > div > p:last-child { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
 .shared-content { min-height: 360px; max-height: 70vh; margin: 0; padding: 28px 30px; overflow: auto; color: #e9f2ed; background: #182824; font: 14px/1.7 var(--mono); white-space: pre-wrap; }
+.shared-attachments { padding: 20px 30px; background: var(--paper); }
+.shared-attachments .attachment-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
 .shared-footer { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 18px 30px; color: var(--muted); font-size: 12px; }
 .shared-footer span, .text-link { display: inline-flex; align-items: center; gap: 7px; }
 .text-link { color: var(--deep); font-weight: 700; text-decoration: none; }
@@ -298,8 +328,11 @@ a { color: inherit; }
   .composer-actions > span { display: none; }
   .composer-actions > div { width: 100%; justify-content: flex-end; }
   .paste-card-head { align-items: stretch; }
-  .paste-actions { justify-content: flex-end; }
+  .paste-actions { justify-content: flex-end; flex-wrap: wrap; }
   .paste-actions button span { display: none; }
+  .attachment-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .attachment-row > button { grid-column: auto; }
+  .attachment-list .attachment-row > button:last-child { display: none; }
   .shared-heading, .shared-footer, .shared-content { padding-left: 20px; padding-right: 20px; }
 }
 

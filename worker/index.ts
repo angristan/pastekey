@@ -11,13 +11,30 @@ import { Hono, type Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { secureHeaders } from "hono/secure-headers";
 
-import type { AuthSuccess, MeResponse, StoredPaste, StoredShare, WrappedKey } from "../src/lib/types";
+import type {
+  AppConfig,
+  AuthSuccess,
+  MeResponse,
+  StoredAttachment,
+  StoredPaste,
+  StoredShare,
+  WrappedKey,
+} from "../src/lib/types";
 
 type Bindings = {
   DB: D1Database;
+  FILES: R2Bucket;
+  AUTH_RATE_LIMITER: RateLimit;
+  WRITE_RATE_LIMITER: RateLimit;
+  MAX_FILE_BYTES?: string;
+  MAX_FILES_PER_PASTE?: string;
+  MAX_PASTES_PER_USER?: string;
+  MAX_STORAGE_BYTES?: string;
+  ORIGIN?: string;
   RP_ID?: string;
   RP_NAME?: string;
-  ORIGIN?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  TURNSTILE_SITE_KEY?: string;
 };
 
 type Variables = {
@@ -62,12 +79,20 @@ type ShareWrite = {
   expiresAt?: number | null;
 };
 
+type AttachmentRow = StoredAttachment & {
+  objectKey: string;
+};
+
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 const SESSION_COOKIE = "pk_session";
 const CEREMONY_COOKIE = "pk_ceremony";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const CEREMONY_TTL_SECONDS = 60 * 5;
 const MAX_CIPHERTEXT_LENGTH = 1_000_000;
+const DEFAULT_MAX_FILE_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MAX_FILES_PER_PASTE = 10;
+const DEFAULT_MAX_PASTES_PER_USER = 100;
+const DEFAULT_MAX_STORAGE_BYTES = 100 * 1024 * 1024;
 const OPAQUE_ID = /^[A-Za-z0-9_-]{20,64}$/;
 
 app.use("/api/*", secureHeaders());
@@ -75,12 +100,37 @@ app.use("/api/*", async (c, next) => {
   c.header("Cache-Control", "no-store");
   await next();
 });
+app.use("/api/auth/*", async (c, next) => {
+  if (c.req.method === "POST" && !(await consumeRateLimit(c, c.env.AUTH_RATE_LIMITER, "auth"))) {
+    return c.json({ error: "Too many authentication attempts. Try again shortly." }, 429);
+  }
+  await next();
+});
+app.use("/api/pastes/*", async (c, next) => {
+  if (["POST", "PUT", "DELETE"].includes(c.req.method) && !(await consumeRateLimit(c, c.env.WRITE_RATE_LIMITER, "write"))) {
+    return c.json({ error: "Too many changes. Try again shortly." }, 429);
+  }
+  await next();
+});
 
 app.get("/api/health", (c) => c.json({ ok: true }));
+app.get("/api/config", (c) => {
+  const limits = serviceLimits(c.env);
+  const hostname = new URL(c.req.url).hostname;
+  const localWithoutSecret = (hostname === "localhost" || hostname === "127.0.0.1") && !c.env.TURNSTILE_SECRET_KEY;
+  return c.json<AppConfig>({
+    limits,
+    turnstileSiteKey: localWithoutSecret ? null : (c.env.TURNSTILE_SITE_KEY ?? null),
+  });
+});
 
 app.post("/api/auth/register/options", async (c) => {
   const existing = await currentUser(c);
   if (existing) return c.json({ error: "Already signed in" }, 409);
+
+  const body = await readJson<{ turnstileToken?: string }>(c);
+  const turnstile = await verifyTurnstile(c, body?.turnstileToken);
+  if (!turnstile.ok) return c.json({ error: turnstile.error }, turnstile.status);
 
   const userId = randomId();
   return beginRegistration(c, userId, "register", []);
@@ -313,6 +363,13 @@ app.post("/api/pastes", requireUser, async (c) => {
   const body = await readJson<PasteWrite>(c);
   if (!validPasteWrite(body)) return c.json({ error: "Invalid encrypted paste" }, 400);
 
+  const count = await c.env.DB.prepare("SELECT COUNT(*) AS count FROM pastes WHERE owner_id = ?")
+    .bind(c.get("userId"))
+    .first<{ count: number }>();
+  if ((count?.count ?? 0) >= serviceLimits(c.env).maxPastesPerUser) {
+    return c.json({ error: "Paste quota reached. Delete a paste before creating another." }, 413);
+  }
+
   const now = Date.now();
   try {
     await c.env.DB.prepare(
@@ -365,10 +422,130 @@ app.put("/api/pastes/:id", requireUser, async (c) => {
 });
 
 app.delete("/api/pastes/:id", requireUser, async (c) => {
+  const pasteId = c.req.param("id")!;
+  const objects = await c.env.DB.prepare(
+    `SELECT a.object_key AS objectKey FROM attachments a JOIN pastes p ON p.id = a.paste_id
+     WHERE p.id = ? AND p.owner_id = ?`,
+  )
+    .bind(pasteId, c.get("userId"))
+    .all<{ objectKey: string }>();
+  if (objects.results.length) await c.env.FILES.delete(objects.results.map((item) => item.objectKey));
+
   const result = await c.env.DB.prepare("DELETE FROM pastes WHERE id = ? AND owner_id = ?")
-    .bind(c.req.param("id"), c.get("userId"))
+    .bind(pasteId, c.get("userId"))
     .run();
   if (!result.meta.changes) return c.json({ error: "Paste not found" }, 404);
+  return c.body(null, 204);
+});
+
+app.get("/api/pastes/:id/files", requireUser, async (c) => {
+  const pasteId = c.req.param("id")!;
+  const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
+    .bind(pasteId, c.get("userId"))
+    .first();
+  if (!paste) return c.json({ error: "Paste not found" }, 404);
+  return c.json({ attachments: await listAttachments(c.env.DB, pasteId) });
+});
+
+app.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c) => {
+  const pasteId = c.req.param("pasteId")!;
+  const fileId = c.req.param("fileId")!;
+  const userId = c.get("userId");
+  const limits = serviceLimits(c.env);
+  const length = Number(c.req.header("Content-Length"));
+
+  if (!OPAQUE_ID.test(fileId)) return c.json({ error: "Invalid attachment ID" }, 400);
+  if (!Number.isSafeInteger(length) || length <= 16) return c.json({ error: "Content-Length is required" }, 411);
+  if (length > limits.maxFileBytes + 16) return c.json({ error: "Encrypted file exceeds the size limit" }, 413);
+
+  const fields = readAttachmentHeaders(c.req.raw.headers);
+  if (!fields) return c.json({ error: "Invalid encrypted attachment metadata" }, 400);
+
+  const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
+    .bind(pasteId, userId)
+    .first();
+  if (!paste) return c.json({ error: "Paste not found" }, 404);
+
+  const existing = await c.env.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first();
+  if (existing) return c.json({ error: "Attachment ID already exists" }, 409);
+
+  const [fileCount, storage] = await Promise.all([
+    c.env.DB.prepare("SELECT COUNT(*) AS count FROM attachments WHERE paste_id = ?")
+      .bind(pasteId)
+      .first<{ count: number }>(),
+    c.env.DB.prepare(
+      `SELECT COALESCE(SUM(a.ciphertext_size), 0) AS bytes FROM attachments a
+       JOIN pastes p ON p.id = a.paste_id WHERE p.owner_id = ?`,
+    )
+      .bind(userId)
+      .first<{ bytes: number }>(),
+  ]);
+  if ((fileCount?.count ?? 0) >= limits.maxFilesPerPaste) {
+    return c.json({ error: "Attachment limit reached for this paste" }, 413);
+  }
+  if ((storage?.bytes ?? 0) + length > limits.maxStorageBytes) {
+    return c.json({ error: "Account storage quota exceeded" }, 413);
+  }
+  if (!c.req.raw.body) return c.json({ error: "Encrypted file body is required" }, 400);
+
+  const objectKey = `${userId}/${pasteId}/${fileId}`;
+  await c.env.FILES.put(objectKey, c.req.raw.body, {
+    httpMetadata: { contentType: "application/octet-stream" },
+  });
+
+  const now = Date.now();
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO attachments (
+        id, paste_id, object_key, ciphertext_size, content_iv, wrapped_key, wrapped_key_iv,
+        metadata_ciphertext, metadata_iv, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        fileId,
+        pasteId,
+        objectKey,
+        length,
+        fields.contentIv,
+        fields.wrappedKey,
+        fields.wrappedKeyIv,
+        fields.metadataCiphertext,
+        fields.metadataIv,
+        now,
+      )
+      .run();
+  } catch {
+    await c.env.FILES.delete(objectKey);
+    return c.json({ error: "Attachment could not be saved" }, 409);
+  }
+
+  return c.json({ id: fileId, createdAt: now }, 201);
+});
+
+app.get("/api/pastes/:pasteId/files/:fileId/content", requireUser, async (c) => {
+  const attachment = await c.env.DB.prepare(
+    `SELECT a.object_key AS objectKey FROM attachments a JOIN pastes p ON p.id = a.paste_id
+     WHERE a.id = ? AND p.id = ? AND p.owner_id = ?`,
+  )
+    .bind(c.req.param("fileId"), c.req.param("pasteId"), c.get("userId"))
+    .first<{ objectKey: string }>();
+  if (!attachment) return c.json({ error: "Attachment not found" }, 404);
+  return streamR2Object(c, attachment.objectKey);
+});
+
+app.delete("/api/pastes/:pasteId/files/:fileId", requireUser, async (c) => {
+  const attachment = await c.env.DB.prepare(
+    `SELECT a.object_key AS objectKey FROM attachments a JOIN pastes p ON p.id = a.paste_id
+     WHERE a.id = ? AND p.id = ? AND p.owner_id = ?`,
+  )
+    .bind(c.req.param("fileId"), c.req.param("pasteId"), c.get("userId"))
+    .first<{ objectKey: string }>();
+  if (!attachment) return c.json({ error: "Attachment not found" }, 404);
+
+  await c.env.FILES.delete(attachment.objectKey);
+  await c.env.DB.prepare("DELETE FROM attachments WHERE id = ? AND paste_id = ?")
+    .bind(c.req.param("fileId"), c.req.param("pasteId"))
+    .run();
   return c.body(null, 204);
 });
 
@@ -433,9 +610,26 @@ app.get("/api/shares/:id", async (c) => {
        AND (p.expires_at IS NULL OR p.expires_at > ?)`,
   )
     .bind(c.req.param("id"), now, now)
-    .first<StoredShare>();
+    .first<Omit<StoredShare, "attachments">>();
   if (!share) return c.json({ error: "Share not found or expired" }, 404);
-  return c.json(share);
+  const attachments = await listAttachments(c.env.DB, share.pasteId);
+  return c.json({ ...share, attachments });
+});
+
+app.get("/api/shares/:shareId/files/:fileId/content", async (c) => {
+  const now = Date.now();
+  const attachment = await c.env.DB.prepare(
+    `SELECT a.object_key AS objectKey FROM attachments a
+     JOIN pastes p ON p.id = a.paste_id
+     JOIN shares s ON s.paste_id = p.id
+     WHERE a.id = ? AND s.id = ?
+       AND (s.expires_at IS NULL OR s.expires_at > ?)
+       AND (p.expires_at IS NULL OR p.expires_at > ?)`,
+  )
+    .bind(c.req.param("fileId"), c.req.param("shareId"), now, now)
+    .first<{ objectKey: string }>();
+  if (!attachment) return c.json({ error: "Attachment not found or share expired" }, 404);
+  return streamR2Object(c, attachment.objectKey);
 });
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
@@ -534,9 +728,10 @@ function cookieOptions(c: AppContext, maxAge: number, path: string) {
 
 function relyingParty(c: AppContext) {
   const url = new URL(c.req.url);
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   return {
-    rpID: c.env.RP_ID ?? url.hostname,
-    origin: c.env.ORIGIN ?? url.origin,
+    rpID: local ? url.hostname : (c.env.RP_ID ?? url.hostname),
+    origin: local ? url.origin : (c.env.ORIGIN ?? url.origin),
   };
 }
 
@@ -549,6 +744,132 @@ async function getOwnedPaste(c: AppContext, id: string) {
   )
     .bind(id, c.get("userId"), Date.now())
     .first<StoredPaste>();
+}
+
+async function listAttachments(db: D1Database, pasteId: string) {
+  const rows = await db.prepare(
+    `SELECT id, paste_id AS pasteId, ciphertext_size AS ciphertextSize, content_iv AS contentIv,
+      wrapped_key AS wrappedKey, wrapped_key_iv AS wrappedKeyIv,
+      metadata_ciphertext AS metadataCiphertext, metadata_iv AS metadataIv, created_at AS createdAt
+     FROM attachments WHERE paste_id = ? ORDER BY created_at`,
+  )
+    .bind(pasteId)
+    .all<StoredAttachment>();
+  return rows.results;
+}
+
+function readAttachmentHeaders(headers: Headers) {
+  const fields = {
+    contentIv: headers.get("X-Pastekey-Content-IV"),
+    wrappedKey: headers.get("X-Pastekey-Wrapped-Key"),
+    wrappedKeyIv: headers.get("X-Pastekey-Wrapped-Key-IV"),
+    metadataCiphertext: headers.get("X-Pastekey-Metadata"),
+    metadataIv: headers.get("X-Pastekey-Metadata-IV"),
+  };
+  if (
+    !validOpaque(fields.contentIv) ||
+    !validOpaque(fields.wrappedKey) ||
+    !validOpaque(fields.wrappedKeyIv) ||
+    !validOpaque(fields.metadataCiphertext, 20_000) ||
+    !validOpaque(fields.metadataIv)
+  ) {
+    return null;
+  }
+  return fields as Record<keyof typeof fields, string>;
+}
+
+async function streamR2Object(c: AppContext, objectKey: string) {
+  const object = await c.env.FILES.get(objectKey);
+  if (!object) return c.json({ error: "Encrypted attachment data not found" }, 404);
+  return new Response(object.body, {
+    headers: {
+      "Cache-Control": "private, no-store",
+      "Content-Length": String(object.size),
+      "Content-Type": "application/octet-stream",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
+function serviceLimits(env: Bindings) {
+  return {
+    maxFileBytes: positiveInteger(env.MAX_FILE_BYTES, DEFAULT_MAX_FILE_BYTES),
+    maxFilesPerPaste: positiveInteger(env.MAX_FILES_PER_PASTE, DEFAULT_MAX_FILES_PER_PASTE),
+    maxPastesPerUser: positiveInteger(env.MAX_PASTES_PER_USER, DEFAULT_MAX_PASTES_PER_USER),
+    maxStorageBytes: positiveInteger(env.MAX_STORAGE_BYTES, DEFAULT_MAX_STORAGE_BYTES),
+  };
+}
+
+function positiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+async function consumeRateLimit(c: AppContext, limiter: RateLimit, scope: string) {
+  const ip = c.req.header("CF-Connecting-IP") ?? "local";
+  try {
+    return (await limiter.limit({ key: `${scope}:${ip}` })).success;
+  } catch (error) {
+    console.error("Rate limiter unavailable", error);
+    return true;
+  }
+}
+
+async function verifyTurnstile(c: AppContext, token: string | undefined) {
+  if (!c.env.TURNSTILE_SECRET_KEY) {
+    const hostname = new URL(c.req.url).hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") return { ok: true } as const;
+    return { ok: false, status: 503 as const, error: "Registration protection is not configured" };
+  }
+  if (!token || token.length > 2048) {
+    return { ok: false, status: 400 as const, error: "Complete the human verification first" };
+  }
+
+  const form = new FormData();
+  form.set("secret", c.env.TURNSTILE_SECRET_KEY);
+  form.set("response", token);
+  const ip = c.req.header("CF-Connecting-IP");
+  if (ip) form.set("remoteip", ip);
+
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      body: form,
+    });
+    const result = await response.json<{ success: boolean; hostname?: string }>();
+    if (result.success && (!c.env.RP_ID || result.hostname === c.env.RP_ID)) return { ok: true } as const;
+  } catch (error) {
+    console.error("Turnstile verification failed", error);
+  }
+  return { ok: false, status: 400 as const, error: "Human verification failed. Please retry." };
+}
+
+async function cleanupExpired(env: Bindings) {
+  const now = Date.now();
+  const expired = await env.DB.prepare(
+    `SELECT a.id, a.object_key AS objectKey FROM attachments a JOIN pastes p ON p.id = a.paste_id
+     WHERE p.expires_at IS NOT NULL AND p.expires_at <= ? LIMIT 100`,
+  )
+    .bind(now)
+    .all<{ id: string; objectKey: string }>();
+
+  if (expired.results.length) {
+    await env.FILES.delete(expired.results.map((item) => item.objectKey));
+    const placeholders = expired.results.map(() => "?").join(",");
+    await env.DB.prepare(`DELETE FROM attachments WHERE id IN (${placeholders})`)
+      .bind(...expired.results.map((item) => item.id))
+      .run();
+  }
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM pastes WHERE expires_at IS NOT NULL AND expires_at <= ?
+       AND NOT EXISTS (SELECT 1 FROM attachments WHERE attachments.paste_id = pastes.id)`,
+    ).bind(now),
+    env.DB.prepare("DELETE FROM shares WHERE expires_at IS NOT NULL AND expires_at <= ?").bind(now),
+    env.DB.prepare("DELETE FROM auth_challenges WHERE expires_at <= ?").bind(now),
+    env.DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now),
+  ]);
 }
 
 function validPasteWrite(body: PasteWrite | null): body is PasteWrite {
@@ -616,4 +937,9 @@ function fromBase64Url(value: string) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled(_controller, env, context) {
+    context.waitUntil(cleanupExpired(env));
+  },
+} satisfies ExportedHandler<Bindings>;

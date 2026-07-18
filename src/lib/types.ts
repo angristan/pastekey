@@ -15,6 +15,24 @@ export type StoredPaste = {
   version: number;
 };
 
+export type StoredAttachment = {
+  id: string;
+  pasteId: string;
+  ciphertextSize: number;
+  contentIv: string;
+  wrappedKey: string;
+  wrappedKeyIv: string;
+  metadataCiphertext: string;
+  metadataIv: string;
+  createdAt: number;
+};
+
+export type AttachmentMetadata = {
+  name: string;
+  type: string;
+  size: number;
+};
+
 export type StoredShare = {
   id: string;
   pasteId: string;
@@ -25,6 +43,7 @@ export type StoredShare = {
   createdAt: number;
   updatedAt: number;
   expiresAt: number | null;
+  attachments: StoredAttachment[];
 };
 
 export type PastePayload = {
@@ -45,6 +64,16 @@ export type MeResponse = {
   authenticated: boolean;
   userId?: string;
   passkeys?: PasskeySummary[];
+};
+
+export type AppConfig = {
+  limits: {
+    maxFileBytes: number;
+    maxFilesPerPaste: number;
+    maxPastesPerUser: number;
+    maxStorageBytes: number;
+  };
+  turnstileSiteKey: string | null;
 };
 
 export type AuthSuccess = {
