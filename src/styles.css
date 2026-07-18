@@ -120,7 +120,13 @@ a { color: inherit; }
   border: 1px solid rgba(223, 255, 79, .22);
   border-radius: 50%;
 }
-.security-visual::after { width: 210px; height: 210px; border-style: dashed; }
+.security-visual::before { animation: security-ring-breathe 8s ease-in-out infinite; }
+.security-visual::after {
+  width: 210px;
+  height: 210px;
+  border-style: dashed;
+  animation: security-ring-turn 32s linear infinite;
+}
 
 .key-orbit {
   z-index: 1;
@@ -132,6 +138,7 @@ a { color: inherit; }
   background: var(--acid);
   border-radius: 50%;
   box-shadow: 0 0 70px rgba(223, 255, 79, .28);
+  animation: security-key-float 6s ease-in-out infinite;
 }
 
 .cipher-lines {
@@ -144,7 +151,23 @@ a { color: inherit; }
   font: 12px/1 var(--mono);
   letter-spacing: .22em;
 }
-.cipher-lines span:nth-child(2) { text-align: right; }
+.cipher-lines span { animation: security-cipher-drift 9s ease-in-out infinite; }
+.cipher-lines span:nth-child(2) { text-align: right; animation-delay: -3s; animation-direction: alternate-reverse; }
+.cipher-lines span:nth-child(3) { animation-delay: -6s; }
+
+@keyframes security-ring-breathe {
+  0%, 100% { opacity: .72; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.035); }
+}
+@keyframes security-ring-turn { to { transform: rotate(360deg); } }
+@keyframes security-key-float {
+  0%, 100% { transform: translateY(0) scale(1); box-shadow: 0 0 60px rgba(223, 255, 79, .24); }
+  50% { transform: translateY(-5px) scale(1.025); box-shadow: 0 0 82px rgba(223, 255, 79, .34); }
+}
+@keyframes security-cipher-drift {
+  0%, 100% { opacity: .68; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(8px); }
+}
 
 .security-copy {
   display: flex;
@@ -467,5 +490,9 @@ a { color: inherit; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
