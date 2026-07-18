@@ -62,6 +62,14 @@
         "retry_delay": 60,
         "max_concurrency": 2,
         "dead_letter_queue": "pastekey-deletions-dlq"
+      },
+      {
+        "queue": "pastekey-deletions-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 100,
+        "retry_delay": 300,
+        "max_concurrency": 1
       }
     ]
   },

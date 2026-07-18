@@ -32,6 +32,7 @@ export type AppContext = Context<AppEnv>;
 
 export type DeletionMessage = {
   jobId: string;
+  cycle?: number;
 };
 
 export type AccountDeletionPayload = {
@@ -45,6 +46,9 @@ export type DeletionJobRow = {
   ciphertext_size: number;
   created_at: number;
   queued_at: number | null;
+  failure_cycles: number;
+  next_attempt_at: number;
+  last_failed_at: number | null;
 };
 
 export type ChallengeRow = {

@@ -38,6 +38,7 @@ Passkey PRF ──HKDF──> passkey wrapping key
 - Workers Rate Limiting + Turnstile registration protection
 - Workers Analytics Engine for identifier-free product and reliability metrics
 - Cloudflare Queues for retryable routine ciphertext deletion
+- An actively consumed dead-letter queue with exponential retry cycles capped at once per day
 - Cloudflare Workflows for durable account deletion
 - Hourly expiry cleanup backed by a transactional D1 deletion outbox
 - React + Vite + Cloudflare Vite plugin

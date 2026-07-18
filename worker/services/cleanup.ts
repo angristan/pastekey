@@ -1,5 +1,5 @@
 import type { Bindings } from "../types";
-import { enqueuePendingDeletions, stageDeletion } from "./deletions";
+import { enqueuePendingDeletions, recoverStaleDeletions, stageDeletion } from "./deletions";
 
 const EXPIRY_BATCH_SIZE = 100;
 
@@ -29,5 +29,6 @@ export async function cleanupExpired(env: Bindings) {
     env.DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now),
   ]);
 
-  await enqueuePendingDeletions(env);
+  await recoverStaleDeletions(env.DB, now);
+  await enqueuePendingDeletions(env, now);
 }
