@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import type { ShareWrite, StoredShare } from "../../shared/protocol/pastes";
 import { OPAQUE_ID } from "../lib/config";
+import { throwUniqueConflict } from "../lib/errors";
 import { normalizeExpiry, readJson, SMALL_JSON_BODY_BYTES, validOpaque } from "../lib/http";
 import { listAttachments, streamR2Object } from "../repositories/attachments";
 import { findActiveOwnedPaste } from "../repositories/pastes";
@@ -41,8 +42,8 @@ shareRoutes.post("/api/pastes/:id/shares", requireUser, async (c) => {
     )
       .bind(body.id, pasteId, body.wrappedKey, body.wrappedKeyIv, now, normalizeExpiry(body.expiresAt))
       .run();
-  } catch {
-    return c.json({ error: "Share ID already exists" }, 409);
+  } catch (cause) {
+    throwUniqueConflict(cause, "Share ID already exists");
   }
   return c.json({ id: body.id, createdAt: now }, 201);
 });

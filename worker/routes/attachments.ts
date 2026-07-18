@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 
 import { OPAQUE_ID, serviceLimits } from "../lib/config";
+import { serviceUnavailable, throwUniqueConflict } from "../lib/errors";
 import {
   finalizeAttachment,
   listAttachments,
@@ -44,8 +45,8 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
   let reserved: D1Result;
   try {
     reserved = await reserveAttachment(c.env.DB, reservation, limits);
-  } catch {
-    return c.json({ error: "Attachment ID is already reserved" }, 409);
+  } catch (cause) {
+    throwUniqueConflict(cause, "Attachment ID is already reserved");
   }
   if (!reserved.meta.changes) {
     const [paste, identity, fileCount] = await Promise.all([
@@ -78,9 +79,9 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
     await c.env.FILES.put(objectKey, c.req.raw.body, {
       httpMetadata: { contentType: "application/octet-stream" },
     });
-  } catch {
+  } catch (cause) {
     await cleanupRejectedUpload(c, fileId, objectKey);
-    return c.json({ error: "Encrypted attachment upload failed" }, 503);
+    throw serviceUnavailable("Encrypted attachment upload failed", cause);
   }
 
   const now = Date.now();
@@ -95,9 +96,9 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
       metadataIv: fields.metadataIv,
       createdAt: now,
     });
-  } catch {
+  } catch (cause) {
     await cleanupRejectedUpload(c, fileId, objectKey);
-    return c.json({ error: "Attachment could not be saved" }, 409);
+    throwUniqueConflict(cause, "Attachment could not be saved");
   }
   if (!finalized.meta.changes) {
     await cleanupRejectedUpload(c, fileId, objectKey);

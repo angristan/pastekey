@@ -56,6 +56,38 @@ describe("concurrent account invariants", () => {
     expect(count?.count).toBe(100);
   });
 
+  it("maps a duplicate item ID to a conflict", async () => {
+    const now = Date.now();
+    const pasteId = "duplicate-paste-0000001";
+    await bindings.DB.batch([
+      bindings.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(userId, now),
+      bindings.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
+        .bind(await hashToken(token), userId, now, now + 60_000),
+      bindings.DB.prepare(
+        `INSERT INTO pastes (
+          id, owner_id, ciphertext, content_iv, wrapped_key, wrapped_key_iv,
+          created_at, updated_at, expires_at
+        ) VALUES (?, ?, 'AA', 'AA', 'AA', 'AA', ?, ?, NULL)`,
+      ).bind(pasteId, userId, now, now),
+    ]);
+
+    const response = await SELF.fetch("https://paste.test/api/pastes", {
+      method: "POST",
+      headers: { Cookie: `pk_session=${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: pasteId,
+        ciphertext: "AQ",
+        contentIv: "AQ",
+        wrappedKey: "AQ",
+        wrappedKeyIv: "AQ",
+        expiresAt: null,
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "Item ID already exists" });
+  });
+
   it("does not revive an expired item through update", async () => {
     const now = Date.now();
     const pasteId = "expired-paste-00000001";

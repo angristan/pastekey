@@ -3,6 +3,7 @@ import { secureHeaders } from "hono/secure-headers";
 
 import type { AppConfig } from "../shared/protocol/config";
 import { OPAQUE_ID, serviceLimits } from "./lib/config";
+import { ApiHttpError } from "./lib/errors";
 import { RequestBodyTooLargeError } from "./lib/http";
 import { recordApiAnalytics } from "./middleware/analytics";
 import { rateLimitMutations } from "./middleware/rate-limit";
@@ -63,6 +64,10 @@ app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((error, c) => {
   if (error instanceof RequestBodyTooLargeError) {
     return c.json({ error: "Request body too large" }, 413);
+  }
+  if (error instanceof ApiHttpError) {
+    if (error.report) console.error("Handled API infrastructure error", error.cause ?? error);
+    return c.json({ error: error.message }, error.status);
   }
   console.error("Unhandled API error", error);
   return c.json({ error: "Unexpected server error" }, 500);

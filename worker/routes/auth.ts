@@ -12,6 +12,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
 import type { AuthSuccess, MeResponse, WrappedKey } from "../../shared/protocol/auth";
 import { relyingParty } from "../lib/config";
+import { throwUniqueConflict } from "../lib/errors";
 import { fromBase64Url, randomId, toBase64Url } from "../lib/encoding";
 import {
   parseTransports,
@@ -122,8 +123,8 @@ authRoutes.post("/api/auth/register/verify", async (c) => {
 
   try {
     await c.env.DB.batch(statements);
-  } catch {
-    return c.json({ error: "This passkey is already registered" }, 409);
+  } catch (cause) {
+    throwUniqueConflict(cause, "This passkey is already registered");
   }
 
   deleteCookie(c, CEREMONY_COOKIE, { path: "/api/auth" });

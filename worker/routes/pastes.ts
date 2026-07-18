@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import type { PasteWrite } from "../../shared/protocol/pastes";
 import { MAX_CIPHERTEXT_LENGTH, OPAQUE_ID, serviceLimits } from "../lib/config";
+import { throwUniqueConflict } from "../lib/errors";
 import { normalizeExpiry, PASTE_JSON_BODY_BYTES, readJson, validExpiry, validOpaque } from "../lib/http";
 import {
   findActiveOwnedPaste,
@@ -56,8 +57,8 @@ pasteRoutes.post("/api/pastes", requireUser, async (c) => {
         serviceLimits(c.env).maxPastesPerUser,
       )
       .run();
-  } catch {
-    return c.json({ error: "Item ID already exists" }, 409);
+  } catch (cause) {
+    throwUniqueConflict(cause, "Item ID already exists");
   }
   if (!inserted.meta.changes) {
     const active = await c.env.DB.prepare(
