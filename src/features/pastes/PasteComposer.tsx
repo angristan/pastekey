@@ -10,10 +10,11 @@ import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "rea
 import { api, ApiError, jsonBody } from "../../lib/api";
 import { encryptAttachment, encryptNewPaste } from "../../lib/crypto";
 import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
-import type { AppConfig, ItemKind } from "../../lib/types";
+import type { AppConfig, ItemKind, StoredAttachment } from "../../lib/types";
 import { uploadWithRetry } from "../../lib/uploads";
 
 type UploadPhase = "pending" | "encrypting" | "uploading" | "retrying" | "complete" | "error";
+type EncryptedAttachment = Awaited<ReturnType<typeof encryptAttachment>>;
 
 type SelectedFile = {
   id: string;
@@ -23,6 +24,7 @@ type SelectedFile = {
   attempt?: number;
   maxAttempts?: number;
   error?: string;
+  encrypted?: EncryptedAttachment;
 };
 
 type UploadSession = {
@@ -116,9 +118,14 @@ export function PasteComposer({
   }
 
   async function uploadFile(selected: SelectedFile, session: UploadSession) {
-    updateFile(selected.id, { phase: "encrypting", progress: 0, error: undefined, attempt: undefined, maxAttempts: undefined });
+    updateFile(selected.id, { progress: 0, error: undefined, attempt: undefined, maxAttempts: undefined });
     try {
-      const attachment = await encryptAttachment(session.pasteKey, session.pasteId, selected.file);
+      let attachment = selected.encrypted;
+      if (!attachment) {
+        updateFile(selected.id, { phase: "encrypting" });
+        attachment = await encryptAttachment(session.pasteKey, session.pasteId, selected.file);
+        updateFile(selected.id, { encrypted: attachment });
+      }
       updateFile(selected.id, { phase: "uploading" });
       await uploadWithRetry(
         `/api/pastes/${session.pasteId}/files/${attachment.id}`,
@@ -138,6 +145,12 @@ export function PasteComposer({
             attempt,
             maxAttempts,
           }),
+          confirmConflict: async () => {
+            const result = await api<{ attachments: StoredAttachment[] }>(
+              `/api/pastes/${session.pasteId}/files`,
+            );
+            return result.attachments.some(({ id }) => id === attachment.id);
+          },
         },
       );
       updateFile(selected.id, { phase: "complete", progress: 100, attempt: undefined, maxAttempts: undefined });

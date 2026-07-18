@@ -76,19 +76,41 @@ describe("uploadWithRetry", () => {
     expect(FakeXMLHttpRequest.sends).toBe(3);
   });
 
-  it("accepts a conflict after an indeterminate upload result", async () => {
+  it("accepts a conflict only after confirming the exact attachment", async () => {
     vi.useFakeTimers();
     FakeXMLHttpRequest.outcomes = [
       { type: "error" },
       { type: "response", status: 409, body: JSON.stringify({ error: "Attachment ID already exists" }) },
     ];
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    const confirmConflict = vi.fn(async () => true);
 
-    const result = uploadWithRetry("/upload", new Uint8Array(16), {}, { onProgress: vi.fn(), onRetry: vi.fn() });
+    const result = uploadWithRetry("/upload", new Uint8Array(16), {}, {
+      onProgress: vi.fn(),
+      onRetry: vi.fn(),
+      confirmConflict,
+    });
     await vi.runAllTimersAsync();
 
     await expect(result).resolves.toBeUndefined();
+    expect(confirmConflict).toHaveBeenCalledOnce();
     expect(FakeXMLHttpRequest.sends).toBe(2);
+  });
+
+  it("rejects an unrelated attachment conflict", async () => {
+    FakeXMLHttpRequest.outcomes = [
+      { type: "response", status: 409, body: JSON.stringify({ error: "Attachment ID is already reserved" }) },
+    ];
+    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+
+    const result = uploadWithRetry("/upload", new Uint8Array(16), {}, {
+      onProgress: vi.fn(),
+      onRetry: vi.fn(),
+      confirmConflict: async () => false,
+    });
+
+    await expect(result).rejects.toEqual(new ApiError("Attachment ID is already reserved", 409));
+    expect(FakeXMLHttpRequest.sends).toBe(1);
   });
 
   it("does not retry permanent errors", async () => {

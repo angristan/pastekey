@@ -5,6 +5,7 @@ const MAX_UPLOAD_ATTEMPTS = 3;
 type UploadCallbacks = {
   onProgress: (loaded: number, total: number) => void;
   onRetry: (attempt: number, maxAttempts: number) => void;
+  confirmConflict?: () => Promise<boolean>;
 };
 
 export async function uploadWithRetry(
@@ -13,18 +14,17 @@ export async function uploadWithRetry(
   headers: HeadersInit,
   callbacks: UploadCallbacks,
 ) {
-  let retriedAfterIndeterminateResult = false;
-
   for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt += 1) {
     try {
       await upload(path, body, headers, callbacks.onProgress);
       return;
     } catch (cause) {
-      // The server may have persisted the file even when its success response was lost.
-      if (cause instanceof ApiError && cause.status === 409 && retriedAfterIndeterminateResult) return;
+      // The server may have persisted the exact attachment even when its response was lost.
+      if (cause instanceof ApiError && cause.status === 409 && callbacks.confirmConflict) {
+        if (await callbacks.confirmConflict()) return;
+      }
       if (!isRetryable(cause) || attempt === MAX_UPLOAD_ATTEMPTS) throw cause;
 
-      retriedAfterIndeterminateResult = true;
       callbacks.onRetry(attempt + 1, MAX_UPLOAD_ATTEMPTS);
       await waitBeforeRetry(attempt);
     }
