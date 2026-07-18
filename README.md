@@ -4,8 +4,6 @@
 
 **Passkey-only, end-to-end encrypted text and file sharing.**
 
-[Open Pastekey](https://paste.stanislas.cloud) · [View the source](https://github.com/angristan/pastekey)
-
 ![Pastekey — private encrypted sharing](public/og-image.png)
 
 Pastekey creates an encrypted vault unlocked by your passkey. Paste text, upload files, or create revocable share links without giving the application backend plaintext content or usable content keys.
