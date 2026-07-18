@@ -41,10 +41,10 @@ export function Landing({
 
       <section className="hero">
         <div className="hero-copy">
-          <p className="eyebrow">No passwords. No plaintext.</p>
-          <h1>Paste or upload.<br />Keep the key.</h1>
+          <p className="eyebrow">Private sharing. No passwords.</p>
+          <h1>Share anything.<br />Keep the key.</h1>
           <p className="hero-description">
-            End-to-end encrypted text and file sharing, unlocked by your passkey. Cloudflare stores ciphertext—not your content.
+            Paste text or upload files. Everything is encrypted in your browser and unlocked with your passkey—the server only stores ciphertext.
           </p>
           {config.turnstileSiteKey && (
             <Turnstile key={challengeVersion} siteKey={config.turnstileSiteKey} onToken={setTurnstileToken} />
@@ -61,7 +61,7 @@ export function Landing({
               Create a vault
             </Button>
             <Button size="lg" icon={FingerprintIcon} loading={busy === "unlock"} onClick={onUnlock}>
-              Unlock
+              Unlock your vault
             </Button>
           </div>
           {error && <Banner variant="error" title="Could not continue" description={error} />}
@@ -79,8 +79,8 @@ export function Landing({
           <div className="security-copy">
             <LockKeyIcon size={22} weight="fill" />
             <div>
-              <strong>Zero-knowledge by design</strong>
-              <p>Encryption happens in this browser. Share keys live after the # and never reach the server.</p>
+              <strong>Encrypted before it leaves</strong>
+              <p>Your browser encrypts everything. Share keys stay in the link fragment and never reach the server.</p>
             </div>
           </div>
         </LayerCard>
