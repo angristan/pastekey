@@ -1,10 +1,29 @@
 # Pastekey
 
-Passkey-native, end-to-end encrypted text and file sharing built on Cloudflare Workers, D1, React, and Kumo.
+[![CI](https://github.com/angristan/pastekey/actions/workflows/ci.yml/badge.svg)](https://github.com/angristan/pastekey/actions/workflows/ci.yml)
+
+**Passkey-only, end-to-end encrypted text and file sharing.**
+
+[Open Pastekey](https://paste.stanislas.cloud) · [View the source](https://github.com/angristan/pastekey)
+
+![Pastekey — private encrypted sharing](public/og-image.png)
+
+Pastekey creates an encrypted vault unlocked by your passkey. Paste text, upload files, or create revocable share links without giving the application backend plaintext content or usable content keys.
+
+## Features
+
+- Passkey-only registration and unlock using the WebAuthn PRF extension
+- Independent AES-256-GCM keys for every item and attachment
+- Encrypted titles, formats, filenames, MIME types, text, and file contents
+- Standalone file drops and text pastes with optional attachments
+- Share secrets kept in URL fragments, outside HTTP requests
+- On-demand local previews for text and passive image, audio, and video formats
+- Expiration, share revocation, backup passkeys, and durable account deletion
+- Responsive, installable web interface with privacy-safe generic link previews
 
 ## Security model
 
-Pastekey encrypts and decrypts in the browser. Assuming the delivered JavaScript is trusted, the Worker and D1 never receive plaintext or usable decryption keys.
+Encryption and decryption happen in the browser. The backend stores ciphertext and wrapped keys only, **assuming the delivered JavaScript is trusted**.
 
 ```text
 Passkey PRF ──HKDF──> passkey wrapping key
@@ -13,66 +32,79 @@ Passkey PRF ──HKDF──> passkey wrapping key
                    account key
                          │ unwraps
                          ▼
-                  per-item random key ──AES-GCM──> paste or file drop
+                  per-item random key ──AES-GCM──> encrypted item
                          │
                          ├── wraps independent file keys ──AES-GCM──> R2 ciphertext
                          └── wrapped by a share key from the URL #fragment
 ```
 
-- Every paste or standalone file drop gets an independent random AES-256-GCM key.
-- The account key is wrapped independently for each passkey using WebAuthn PRF output.
-- Item type, title, format, and text content are encrypted together; legacy pastes remain compatible.
-- Every file has an independent key; filename, MIME type, and bytes are encrypted locally before R2 upload.
-- Raster images, audio, video, and text can be decrypted for an on-demand local preview; active HTML, SVG, XML, and unknown formats are never embedded.
-- Share links contain a random secret after `#`; URL fragments are not sent to the server. A new link is shown for copying only in the browser session that created it.
-- Revoking a share deletes its wrapped paste-key envelope. It cannot revoke plaintext already copied by a recipient.
-- Account deletion immediately revokes sessions and shares, then a durable Workflow removes R2 ciphertext in bounded retryable batches before deleting account metadata.
-- D1 and R2 still expose metadata: account/paste/file counts, timestamps, ciphertext sizes, expiry, and access metadata.
-- Analytics Engine records only fixed operation names, outcomes, coarse encrypted-file size buckets, duration, and HTTP status. It never receives paths, identifiers, IP addresses, filenames, or content.
-- Losing every passkey means losing the vault. There is no server-side reset in this version.
+- Each passkey wraps the account key independently.
+- Each paste or file drop has a random item key; each attachment has another random key.
+- Item type, title, format, and text are encrypted together. Legacy payloads remain readable.
+- Share links expose an opaque share ID in the path, while the decryption secret stays after `#` and is never sent to the server.
+- Revocation deletes the wrapped item-key envelope. It cannot revoke plaintext already copied by a recipient.
+- Active formats such as HTML, SVG, and XML are never embedded as previews.
+- Removing a passkey is atomic and cannot remove the account's final credential.
+- Account deletion requires recent passkey verification before access is revoked.
 
-## Stack
+### Trust boundary and limitations
 
-- Cloudflare Worker + Hono API
-- Cloudflare D1 metadata + R2 encrypted attachment storage
-- Workers Rate Limiting + Turnstile registration protection
-- Workers Analytics Engine for identifier-free product and reliability metrics
-- Cloudflare Queues for retryable routine ciphertext deletion
-- An actively consumed dead-letter queue with exponential retry cycles capped at once per day
-- Cloudflare Workflows for durable account deletion
-- Hourly expiry cleanup backed by a transactional D1 deletion outbox
-- React + Vite + Cloudflare Vite plugin
-- Cloudflare Kumo components
-- SimpleWebAuthn server verification
-- Browser WebCrypto only for content encryption
+Pastekey does not protect against a compromised device, browser extension, dependency, or modified application JavaScript. Cloudflare and the network still observe normal request metadata, including IP-level traffic information and ciphertext sizes.
+
+D1 and R2 retain operational metadata such as opaque IDs, account/item/file counts, timestamps, expiration, and ciphertext sizes. Analytics Engine receives only fixed operation names, outcomes, coarse encrypted-file size buckets, duration, and HTTP status—never paths, identifiers, IP addresses, filenames, or content.
+
+Losing every passkey means losing the vault. There is no server-side recovery or password reset.
+
+Shared URLs use generic Open Graph metadata and are served with `noindex`; encrypted titles, filenames, content, and fragment secrets are never used for link previews.
 
 ## Architecture
 
 ```text
-src/
-├── components/          # Shared presentation, including attachment rows
-├── crypto/              # Account, paste/share, attachment protocols and primitives
-├── features/
-│   ├── auth/            # Landing, locked state, Turnstile
-│   ├── pastes/          # Dashboard, composer, paste management
-│   └── sharing/         # Public shared paste and file-drop experience
-└── lib/                 # Stable API surface, API client, downloads, formatting, protocol types
-
-worker/
-├── routes/              # Auth, paste, attachment, and sharing HTTP boundaries
-├── middleware/          # Cross-cutting request policy
-├── repositories/        # D1/R2 persistence adapters
-├── services/            # Sessions, Turnstile, queued retention cleanup
-├── workflows/           # Durable multi-step account deletion
-├── lib/                 # Validation, encoding, and configuration
-└── index.ts             # Composition root only
+Browser
+  ├── WebAuthn PRF + WebCrypto
+  ├── plaintext and keys remain local
+  └── URL-fragment share secret
+          │ ciphertext only
+          ▼
+Cloudflare Worker (Hono)
+  ├── D1: users, credentials, sessions, ciphertext metadata, deletion outbox
+  ├── R2: encrypted attachment bodies
+  ├── Queues + DLQ: retryable routine deletion
+  ├── Workflows: durable account deletion
+  └── Analytics Engine: identifier-free operational events
 ```
 
-Cryptography and wire-format types remain independent of React. Worker routes own HTTP concerns while reusable infrastructure stays outside route modules. Analytics uses a fixed, identifier-free schema documented in `worker/middleware/analytics.ts`. Tests run inside the Workers runtime with isolated D1 and R2 bindings; the attachment suite exercises the authenticated upload, list, download, and cleanup lifecycle end to end.
+The codebase is feature-oriented:
 
-## Develop
+```text
+src/
+├── components/          # Shared UI
+├── crypto/              # Account, item/share, attachment protocols and primitives
+├── features/            # Auth, vault, composer, and public sharing
+└── lib/                 # API, passkeys, downloads, formatting, and protocol types
 
-Requirements: Bun and a browser/passkey provider supporting the WebAuthn PRF extension.
+worker/
+├── routes/              # HTTP and authorization boundaries
+├── middleware/          # Security, rate limiting, and analytics
+├── repositories/        # D1/R2 persistence
+├── services/            # Sessions, Turnstile, cleanup, and deletion recovery
+├── workflows/           # Durable account deletion
+└── lib/                 # Validation, encoding, and configuration
+```
+
+D1 conditional writes and upload reservations enforce item, file-count, and storage quotas under concurrency. Routine R2 deletion uses a transactional D1 outbox, Queue retries, and an actively consumed dead-letter queue. Interrupted account-deletion Workflows are reconciled by scheduled cleanup.
+
+## Requirements and compatibility
+
+- [Bun](https://bun.sh/)
+- A Cloudflare account with Workers, D1, R2, Queues, Workflows, Analytics Engine, Turnstile, and Workers Rate Limiting
+- A browser and passkey provider that expose the **WebAuthn PRF extension**
+
+Ordinary passkey support is not enough; PRF support is mandatory. Test every browser/device combination you intend to rely on, and register a backup passkey where possible.
+
+WebAuthn credentials are scoped to the RP ID. Changing `RP_ID` after registration requires users to register new credentials. The Worker compatibility date is deliberately pinned to `2026-07-15` and should only be changed after running the full verification suite.
+
+## Local development
 
 ```bash
 bun install
@@ -80,33 +112,78 @@ bun run db:migrate:local
 bun run dev
 ```
 
-WebAuthn works on `localhost`. The local D1 database is stored under `.wrangler/`.
+Open the printed localhost URL. WebAuthn works on `localhost`, and Turnstile is bypassed locally when `TURNSTILE_SECRET_KEY` is absent. Local D1 state is stored under `.wrangler/`.
 
-## Deploy
+## Self-hosting
 
-Create D1 and R2 resources, put their bindings in `wrangler.jsonc`, configure your route, WebAuthn RP, limits, and Turnstile widget, then deploy:
+> [!WARNING]
+> `wrangler.jsonc` contains this deployment's database ID, hostname, RP settings, public Turnstile key, queue names, Analytics Engine dataset, Workflow name, and rate-limit namespace IDs. Replace them before deploying a fork. `bun run deploy` applies migrations to the configured **remote** D1 database.
+
+### 1. Authenticate and provision storage
 
 ```bash
+bunx wrangler whoami
 bunx wrangler d1 create pastekey
 bunx wrangler r2 bucket create pastekey-files
 bunx wrangler queues create pastekey-deletions
 bunx wrangler queues create pastekey-deletions-dlq
+```
+
+Copy the new D1 database ID into `wrangler.jsonc`. Keep the `pastekey` database name or update the database name used by the migration scripts in `package.json`.
+
+### 2. Configure Cloudflare resources
+
+Update `wrangler.jsonc`:
+
+- Custom domain and `ORIGIN`
+- WebAuthn `RP_ID` and display `RP_NAME`
+- D1 database ID and R2 bucket name
+- Queue and dead-letter queue names
+- Analytics Engine dataset and Workflow name
+- Unique rate-limit namespace IDs
+- Turnstile site key
+- Optional quota variables
+
+Create a Turnstile widget for the production hostname. The Workflow and Analytics Engine binding are deployed declaratively; D1, R2, and both Queues must already exist.
+
+### 3. Add the Turnstile secret and deploy
+
+```bash
 bunx wrangler secret put TURNSTILE_SECRET_KEY
 bun run deploy
 ```
 
-`bun run deploy` is the supported release path: it runs typecheck, tests, a production build, a Wrangler dry-run, applies pending remote D1 migrations, and only then deploys the Worker. The Turnstile site key is a public `vars` value; its secret must only be stored with `wrangler secret put`. Default quotas are 100 encrypted items, 10 files per item, 25 MiB per file, and 100 MiB of files per account. D1 upload reservations enforce file-count and storage limits before ciphertext reaches R2.
+The supported deployment command runs type checking, the complete test suite, a production build, and a Wrangler dry-run. It then applies pending remote D1 migrations before deploying the Worker.
 
-This repository is configured for `paste.stanislas.cloud`; forks must use their own D1 database and domain. Once passkeys exist for an RP ID, changing it requires registering new credentials.
+### Configuration
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `ORIGIN` | Request origin | Expected WebAuthn origin |
+| `RP_ID` | Request hostname | WebAuthn relying-party ID |
+| `RP_NAME` | `Pastekey` in this deployment | Passkey display name |
+| `TURNSTILE_SITE_KEY` | None | Public registration widget key |
+| `MAX_PASTES_PER_USER` | `100` | Encrypted item quota |
+| `MAX_FILES_PER_PASTE` | `10` | Attachment quota per item |
+| `MAX_FILE_BYTES` | `26214400` | Maximum encrypted file size (25 MiB) |
+| `MAX_STORAGE_BYTES` | `104857600` | File storage quota per account (100 MiB) |
+
+`TURNSTILE_SECRET_KEY` is the only Worker secret. Do not commit it.
+
+The configured rate limits are 20 authentication mutations and 30 write mutations per 60 seconds. Reads and downloads are not rate limited by the application.
 
 ## Commands
 
-```bash
-bun run dev
-bun run typecheck
-bun run test
-bun run build
-bun run verify
-bun run deploy
-bun run db:migrate:local
-```
+| Command | Purpose |
+| --- | --- |
+| `bun run dev` | Start local full-stack development |
+| `bun run typecheck` | Run TypeScript checks |
+| `bun run test` | Run unit and Workers integration tests |
+| `bun run build` | Create a production build |
+| `bun run preview` | Preview the production client build |
+| `bun run verify` | Run checks, tests, build, and deployment dry-run |
+| `bun run db:migrate:local` | Apply local D1 migrations |
+| `bun run db:migrate:remote` | Apply remote D1 migrations |
+| `bun run deploy` | Verify, migrate remote D1, and deploy |
+
+CI installs with the frozen Bun lockfile and runs `bun run verify` for pushes to `main` and pull requests.
