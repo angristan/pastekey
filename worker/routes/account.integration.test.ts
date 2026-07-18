@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
-import { introspectWorkflow, SELF } from "cloudflare:test";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createExecutionContext, introspectWorkflow, SELF } from "cloudflare:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hashToken } from "../lib/encoding";
+import { accountDeletionWorkflowId, accountRoutes } from "./account";
 import type { Bindings } from "../types";
 
 const bindings = env as unknown as Bindings;
@@ -40,9 +41,40 @@ describe("account deletion workflow", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await bindings.FILES.delete(objectKey);
     await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("keeps deletion intent when Workflow creation has an ambiguous failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failingBindings = new Proxy(bindings, {
+      get(target, property, receiver) {
+        if (property === "ACCOUNT_DELETION") {
+          return { create: async () => { throw new Error("simulated ambiguous response"); } };
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const response = await accountRoutes.fetch(
+      new Request("https://paste.test/api/account", {
+        method: "DELETE",
+        headers: { Cookie: `pk_session=${token}` },
+      }),
+      failingBindings,
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(202);
+    const user = await bindings.DB.prepare(
+      "SELECT deletion_requested_at AS requestedAt, deletion_workflow_id AS workflowId FROM users WHERE id = ?",
+    )
+      .bind(userId)
+      .first<{ requestedAt: number | null; workflowId: string | null }>();
+    expect(user?.requestedAt).toEqual(expect.any(Number));
+    expect(user?.workflowId).toBe(accountDeletionWorkflowId(userId));
+    expect(await bindings.DB.prepare("SELECT id FROM sessions WHERE user_id = ?").bind(userId).first()).toBeNull();
   });
 
   it("revokes access, deletes R2 ciphertext, and removes account metadata", async () => {

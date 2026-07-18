@@ -21,7 +21,7 @@ export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, Accoun
 
     for (let batch = 1; batch <= MAX_DELETION_STEPS; batch += 1) {
       const deleted = await step.do(`delete ciphertext batch ${batch}`, STEP_CONFIG, async () =>
-        deleteCiphertextBatch(this.env, event.payload.userId),
+        deleteCiphertextBatch(this.env, event.payload.userId, event.instanceId),
       );
       if (deleted === 0) {
         drained = true;
@@ -59,7 +59,15 @@ export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, Accoun
   }
 }
 
-async function deleteCiphertextBatch(env: Bindings, userId: string) {
+async function deleteCiphertextBatch(env: Bindings, userId: string, workflowId: string) {
+  const owner = await env.DB.prepare(
+    `SELECT id FROM users
+     WHERE id = ? AND deletion_workflow_id = ? AND deletion_requested_at IS NOT NULL`,
+  )
+    .bind(userId, workflowId)
+    .first();
+  if (!owner) return 0;
+
   const rows = await env.DB.prepare(
     `SELECT id, objectKey, source FROM (
       SELECT a.id, a.object_key AS objectKey, 'attachment' AS source
