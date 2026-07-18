@@ -1,7 +1,14 @@
 import { Button } from "@cloudflare/kumo";
-import { DownloadSimpleIcon, FileIcon } from "@phosphor-icons/react";
+import { DownloadSimpleIcon, EyeIcon, FileIcon, XIcon } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 
-import { downloadAttachment, type UnlockedAttachment } from "../lib/attachments";
+import {
+  attachmentPreviewKind,
+  downloadAttachment,
+  fetchDecryptedAttachment,
+  type AttachmentPreviewKind,
+  type UnlockedAttachment,
+} from "../lib/attachments";
 import { formatBytes, messageOf } from "../lib/format";
 
 export function AttachmentList({
@@ -27,15 +34,92 @@ export function AttachmentList({
     <div className={className}>
       <strong>{title}</strong>
       {attachments.length === 0 && emptyMessage ? <p>{emptyMessage}</p> : attachments.map((attachment) => (
-        <div className="attachment-row" key={attachment.stored.id}>
-          <FileIcon />
-          <span>{attachment.metadata.name}</span>
-          <small>{formatBytes(attachment.metadata.size)}</small>
+        <AttachmentRow
+          key={attachment.stored.id}
+          attachment={attachment}
+          buttonSize={buttonSize}
+          downloadEndpoint={downloadEndpoint}
+          onDelete={onDelete}
+          onError={onError}
+        />
+      ))}
+    </div>
+  );
+}
+
+function AttachmentRow({
+  attachment,
+  buttonSize,
+  downloadEndpoint,
+  onDelete,
+  onError,
+}: {
+  attachment: UnlockedAttachment;
+  buttonSize: "xs" | "sm";
+  downloadEndpoint: (attachment: UnlockedAttachment) => string;
+  onDelete?: (attachment: UnlockedAttachment) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const kind = attachmentPreviewKind(attachment.metadata.type);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [preview, setPreview] = useState<{
+    kind: AttachmentPreviewKind;
+    text?: string;
+    truncated?: boolean;
+    url?: string;
+  } | null>(null);
+  const endpoint = downloadEndpoint(attachment);
+
+  useEffect(() => () => {
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+  }, [preview?.url]);
+
+  async function togglePreview() {
+    if (preview) {
+      setPreview(null);
+      return;
+    }
+    if (!kind) return;
+
+    setLoadingPreview(true);
+    try {
+      const blob = await fetchDecryptedAttachment(endpoint, attachment);
+      if (kind === "text") {
+        const text = await blob.text();
+        const limit = 200_000;
+        setPreview({ kind, text: text.slice(0, limit), truncated: text.length > limit });
+      } else {
+        setPreview({ kind, url: URL.createObjectURL(blob) });
+      }
+    } catch (cause) {
+      onError(messageOf(cause));
+    } finally {
+      setLoadingPreview(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="attachment-row">
+        <FileIcon />
+        <span>{attachment.metadata.name}</span>
+        <small>{formatBytes(attachment.metadata.size)}</small>
+        <div className="attachment-actions">
+          {kind && (
+            <Button
+              size={buttonSize}
+              variant="ghost"
+              icon={preview ? XIcon : EyeIcon}
+              loading={loadingPreview}
+              onClick={togglePreview}
+            >
+              {preview ? "Close" : "Preview"}
+            </Button>
+          )}
           <Button
             size={buttonSize}
             icon={DownloadSimpleIcon}
-            onClick={() => downloadAttachment(downloadEndpoint(attachment), attachment)
-              .catch((cause) => onError(messageOf(cause)))}
+            onClick={() => downloadAttachment(endpoint, attachment).catch((cause) => onError(messageOf(cause)))}
           >
             Download
           </Button>
@@ -43,13 +127,29 @@ export function AttachmentList({
             <Button
               size={buttonSize}
               variant="secondary-destructive"
-              onClick={() => onDelete(attachment).catch((cause) => onError(messageOf(cause)))}
+              onClick={() => {
+                setPreview(null);
+                onDelete(attachment).catch((cause) => onError(messageOf(cause)));
+              }}
             >
               Delete
             </Button>
           )}
         </div>
-      ))}
-    </div>
+      </div>
+      {preview && (
+        <div className={`attachment-preview attachment-preview-${preview.kind}`}>
+          {preview.kind === "image" && <img src={preview.url} alt={attachment.metadata.name} />}
+          {preview.kind === "audio" && <audio src={preview.url} controls preload="metadata" />}
+          {preview.kind === "video" && <video src={preview.url} controls preload="metadata" />}
+          {preview.kind === "text" && (
+            <>
+              <pre>{preview.text}</pre>
+              {preview.truncated && <small>Preview limited to the first 200,000 characters.</small>}
+            </>
+          )}
+        </div>
+      )}
+    </>
   );
 }

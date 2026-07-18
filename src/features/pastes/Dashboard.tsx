@@ -1,5 +1,5 @@
 import { Banner, Button, LayerCard } from "@cloudflare/kumo";
-import { CheckIcon, KeyIcon, LockKeyIcon, PlusIcon, SignOutIcon, UploadSimpleIcon } from "@phosphor-icons/react";
+import { CheckIcon, FileTextIcon, KeyIcon, LockKeyIcon, PlusIcon, SignOutIcon, UploadSimpleIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Brand, CenteredStatus, GitHubLink } from "../../components/Brand";
@@ -29,7 +29,7 @@ export function Dashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [composerKind, setComposerKind] = useState<ItemKind | null>(null);
+  const [creator, setCreator] = useState<ItemKind | "choose" | null>(null);
   const [addingPasskey, setAddingPasskey] = useState(false);
 
   const loadPastes = useCallback(async () => {
@@ -53,7 +53,7 @@ export function Dashboard({
   }, [loadPastes]);
 
   async function deletePaste(paste: UnlockedPaste) {
-    const noun = itemKindOf(paste.payload) === "files" ? "file item" : "paste";
+    const noun = itemKindOf(paste.payload) === "files" ? "file drop" : "paste";
     if (!window.confirm(`Delete ${noun} “${paste.payload.title || "Untitled"}”? This cannot be undone.`)) return;
     try {
       await api<void>(`/api/pastes/${paste.stored.id}`, { method: "DELETE" });
@@ -108,26 +108,17 @@ export function Dashboard({
       <section className="dashboard-head">
         <div>
           <p className="eyebrow">Your encrypted vault</p>
-          <h1>Pastes & files</h1>
+          <h1>Vault</h1>
           <p>{pastes.length} encrypted {pastes.length === 1 ? "item" : "items"} · {me.passkeys?.length ?? 1} passkey</p>
         </div>
-        <div className="dashboard-create-actions">
-          <Button
-            size="lg"
-            icon={UploadSimpleIcon}
-            onClick={() => setComposerKind((current) => current === "files" ? null : "files")}
-          >
-            Upload files
-          </Button>
-          <Button
-            variant="primary"
-            size="lg"
-            icon={PlusIcon}
-            onClick={() => setComposerKind((current) => current === "paste" ? null : "paste")}
-          >
-            New paste
-          </Button>
-        </div>
+        <Button
+          variant="primary"
+          size="lg"
+          icon={PlusIcon}
+          onClick={() => setCreator((current) => current ? null : "choose")}
+        >
+          Create
+        </Button>
       </section>
 
       {error && <Banner className="dashboard-banner" variant="error" title="Something went wrong" description={error} />}
@@ -140,18 +131,42 @@ export function Dashboard({
         />
       )}
 
-      {composerKind && (
+      {creator === "choose" && (
+        <LayerCard className="create-picker">
+          <div className="create-picker-heading">
+            <div>
+              <h2>Create something encrypted</h2>
+              <p>Choose what you want to share. You can change your mind before saving.</p>
+            </div>
+            <Button variant="ghost" onClick={() => setCreator(null)}>Cancel</Button>
+          </div>
+          <div className="create-choice-grid">
+            <button type="button" onClick={() => setCreator("paste")}>
+              <FileTextIcon size={28} weight="duotone" />
+              <strong>Text paste</strong>
+              <span>Share text or code, with optional file attachments.</span>
+            </button>
+            <button type="button" onClick={() => setCreator("files")}>
+              <UploadSimpleIcon size={28} weight="duotone" />
+              <strong>File drop</strong>
+              <span>Share one or more files without creating a paste.</span>
+            </button>
+          </div>
+        </LayerCard>
+      )}
+
+      {(creator === "paste" || creator === "files") && (
         <PasteComposer
-          key={composerKind}
+          key={creator}
           accountKey={accountKey}
-          kind={composerKind}
+          kind={creator}
           limits={config.limits}
           onCreated={async () => {
-            setComposerKind(null);
-            setNotice(composerKind === "files" ? "Files encrypted and uploaded." : "Paste encrypted and saved.");
+            setCreator(null);
+            setNotice(creator === "files" ? "File drop encrypted and uploaded." : "Paste encrypted and saved.");
             await loadPastes();
           }}
-          onCancel={() => setComposerKind(null)}
+          onCancel={() => setCreator("choose")}
         />
       )}
 
@@ -162,11 +177,8 @@ export function Dashboard({
           <LayerCard className="empty-card">
             <LockKeyIcon size={32} weight="duotone" />
             <h2>Your vault is empty</h2>
-            <p>Create a paste or upload files. Everything is encrypted before it leaves your browser.</p>
-            <div className="empty-actions">
-              <Button icon={UploadSimpleIcon} onClick={() => setComposerKind("files")}>Upload files</Button>
-              <Button variant="primary" icon={PlusIcon} onClick={() => setComposerKind("paste")}>Create a paste</Button>
-            </div>
+            <p>Create a text paste or file drop. Everything is encrypted before it leaves your browser.</p>
+            <Button variant="primary" icon={PlusIcon} onClick={() => setCreator("choose")}>Create your first item</Button>
           </LayerCard>
         ) : (
           pastes.map((paste) => (

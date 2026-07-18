@@ -25,6 +25,7 @@ export function PasteComposer({
   const [language, setLanguage] = useState("text");
   const [expiry, setExpiry] = useState<Expiry>("week");
   const [files, setFiles] = useState<File[]>([]);
+  const [showAttachments, setShowAttachments] = useState(kind === "files");
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,7 @@ export function PasteComposer({
     setError(null);
     let createdPasteId: string | null = null;
     try {
-      setProgress(kind === "files" ? "Encrypting file item…" : "Encrypting paste…");
+      setProgress(kind === "files" ? "Encrypting file drop…" : "Encrypting paste…");
       const fallbackTitle = kind === "files"
         ? (files.length === 1 ? files[0]!.name : `${files.length} encrypted files`)
         : "Untitled paste";
@@ -83,7 +84,7 @@ export function PasteComposer({
       <form onSubmit={submit}>
         <div className="composer-heading">
           <div>
-            <h2>{kind === "files" ? "Upload encrypted files" : "New encrypted paste"}</h2>
+            <h2>{kind === "files" ? "New encrypted file drop" : "New encrypted paste"}</h2>
             <p>{kind === "files"
               ? "File names, types, and contents are encrypted locally."
               : "The title and content are encrypted together."}</p>
@@ -127,41 +128,52 @@ export function PasteComposer({
             maxLength={500_000}
           />
         )}
-        <div className="file-picker">
-          <label className="file-picker-button">
-            <PaperclipIcon />
-            {kind === "files" ? "Choose files" : "Add encrypted files"}
-            <input
-              type="file"
-              multiple
-              onChange={(event) => {
-                const selected = Array.from(event.target.files ?? []);
-                if (selected.length > limits.maxFilesPerPaste) {
-                  setError(`Choose at most ${limits.maxFilesPerPaste} files.`);
-                  return;
-                }
-                const invalid = selected.find((file) => file.size === 0 || file.size > limits.maxFileBytes);
-                if (invalid) {
-                  setError(`${invalid.name} must be between 1 byte and ${formatBytes(limits.maxFileBytes)}.`);
-                  return;
-                }
-                setError(null);
-                setFiles(selected);
-              }}
-            />
-          </label>
-          <span>Up to {limits.maxFilesPerPaste} files · {formatBytes(limits.maxFileBytes)} each</span>
-        </div>
-        {files.length > 0 && (
-          <div className="selected-files">
-            {files.map((file, index) => (
-              <div key={`${file.name}:${file.size}:${index}`}>
-                <FileIcon />
-                <span>{file.name}</span>
-                <small>{formatBytes(file.size)}</small>
-              </div>
-            ))}
+        {kind === "paste" && !showAttachments && (
+          <div className="optional-attachments">
+            <Button type="button" variant="ghost" icon={PaperclipIcon} onClick={() => setShowAttachments(true)}>
+              Attach files (optional)
+            </Button>
           </div>
+        )}
+        {showAttachments && (
+          <>
+            <div className="file-picker">
+              <label className="file-picker-button">
+                <PaperclipIcon />
+                Choose files
+                <input
+                  type="file"
+                  multiple
+                  onChange={(event) => {
+                    const selected = Array.from(event.target.files ?? []);
+                    if (selected.length > limits.maxFilesPerPaste) {
+                      setError(`Choose at most ${limits.maxFilesPerPaste} files.`);
+                      return;
+                    }
+                    const invalid = selected.find((file) => file.size === 0 || file.size > limits.maxFileBytes);
+                    if (invalid) {
+                      setError(`${invalid.name} must be between 1 byte and ${formatBytes(limits.maxFileBytes)}.`);
+                      return;
+                    }
+                    setError(null);
+                    setFiles(selected);
+                  }}
+                />
+              </label>
+              <span>Up to {limits.maxFilesPerPaste} files · {formatBytes(limits.maxFileBytes)} each</span>
+            </div>
+            {files.length > 0 && (
+              <div className="selected-files">
+                {files.map((file, index) => (
+                  <div key={`${file.name}:${file.size}:${index}`}>
+                    <FileIcon />
+                    <span>{file.name}</span>
+                    <small>{formatBytes(file.size)}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
         <div className="composer-actions">
           <span><LockKeyIcon /> Encrypted with a new per-item key</span>

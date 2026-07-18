@@ -22,6 +22,7 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
   const [metadata, setMetadata] = useState<StoredShare | null>(null);
   const [attachments, setAttachments] = useState<UnlockedAttachment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [panelError, setPanelError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const fileItem = payload ? itemKindOf(payload) === "files" : false;
 
@@ -75,7 +76,7 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
         <LayerCard className="shared-card">
           <div className="shared-heading">
             <div>
-              <p className="eyebrow">{fileItem ? "Encrypted shared files" : "Encrypted shared paste"}</p>
+              <p className="eyebrow">{fileItem ? "Encrypted file drop" : "Encrypted shared paste"}</p>
               <h1>{payload.title}</h1>
               <p>
                 {metadata && `Shared ${formatDate(metadata.createdAt)}`}
@@ -88,6 +89,7 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
               <Button variant="primary" icon={copied ? CheckIcon : CopyIcon} onClick={copy}>{copied ? "Copied" : "Copy"}</Button>
             )}
           </div>
+          {panelError && <div className="share-error">{panelError}</div>}
           {!fileItem && <pre className="shared-content"><code>{payload.content}</code></pre>}
           {(fileItem || attachments.length > 0) && (
             <AttachmentList
@@ -95,13 +97,13 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
               buttonSize="sm"
               className="shared-attachments"
               downloadEndpoint={(attachment) => `/api/shares/${shareId}/files/${attachment.stored.id}/content`}
-              emptyMessage="No files remain in this share."
-              onError={setError}
+              emptyMessage="No files remain in this drop."
+              onError={setPanelError}
               title={fileItem ? "Encrypted files" : "Attachments"}
             />
           )}
           <footer className="shared-footer">
-            <span><KeyIcon /> End-to-end encrypted. Pastekey can’t read this {fileItem ? "file item" : "paste"}.</span>
+            <span><KeyIcon /> End-to-end encrypted. Pastekey can’t read this {fileItem ? "file drop" : "paste"}.</span>
             <a href="/" className="text-link">Create your own <ArrowSquareOutIcon /></a>
           </footer>
         </LayerCard>

@@ -92,7 +92,7 @@ export function PasteCard({
         <div>
           <div className="paste-title-row">
             <h2>{paste.payload.title}</h2>
-            <Badge>{fileItem ? "Files" : paste.payload.language}</Badge>
+            <Badge>{fileItem ? "File drop" : paste.payload.language}</Badge>
           </div>
           <p>Updated {formatDate(paste.stored.updatedAt)} · {formatExpiry(paste.stored.expiresAt)}</p>
         </div>
@@ -108,7 +108,7 @@ export function PasteCard({
             shape="square"
             variant="ghost"
             icon={TrashIcon}
-            aria-label={`Delete ${fileItem ? "file item" : "paste"}`}
+            aria-label={`Delete ${fileItem ? "file drop" : "paste"}`}
             onClick={onDelete}
           />
         </div>
@@ -136,7 +136,7 @@ export function PasteCard({
         <AttachmentList
           attachments={attachments}
           downloadEndpoint={(attachment) => `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`}
-          emptyMessage={fileItem ? "No files remain in this item." : "No files attached."}
+          emptyMessage={fileItem ? "No files remain in this drop." : "No files attached."}
           onDelete={removeFile}
           onError={setPanelError}
           title={fileItem ? "Encrypted files" : "Encrypted attachments"}
