@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "bun run typecheck && vite build",
     "preview": "vite preview",
-    "verify": "bun run typecheck && bun run test && bun run build && wrangler deploy --dry-run",
+    "verify": "bun run test && bun run build && wrangler deploy --dry-run",
     "deploy": "bun run verify && wrangler d1 migrations apply pastekey --remote && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply pastekey --local",
     "db:migrate:remote": "wrangler d1 migrations apply pastekey --remote",
-    "typecheck": "tsc -b",
+    "typecheck": "bun run typecheck:client && bun run typecheck:worker && bun run typecheck:tools",
+    "typecheck:client": "tsc -p tsconfig.client.json",
+    "typecheck:worker": "tsc -p tsconfig.worker.json",
+    "typecheck:tools": "tsc -p tsconfig.tools.json",
     "test": "vitest run"
   },
   "dependencies": {

@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.tools.tsbuildinfo",
+    "types": ["@cloudflare/workers-types", "vite/client"]
+  },
+  "include": ["vite.config.ts", "vitest.config.ts"]
+}
