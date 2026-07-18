@@ -1,10 +1,7 @@
 import {
-  generateAuthenticationOptions,
-  generateRegistrationOptions,
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
   type AuthenticationResponseJSON,
-  type AuthenticatorTransportFuture,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { Hono } from "hono";
@@ -22,6 +19,12 @@ import {
   WEBAUTHN_JSON_BODY_BYTES,
 } from "../lib/http";
 import {
+  beginAuthenticationCeremony,
+  beginRegistrationCeremony,
+  CEREMONY_TTL_SECONDS,
+  findCeremony,
+} from "../services/auth-ceremonies";
+import {
   cookieOptions,
   createSession,
   currentUser,
@@ -32,7 +35,6 @@ import { verifyTurnstile } from "../services/turnstile";
 import type { AppContext, AppEnv, ChallengeRow, CredentialRow } from "../types";
 
 const CEREMONY_COOKIE = "pk_ceremony";
-const CEREMONY_TTL_SECONDS = 60 * 5;
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -146,16 +148,16 @@ authRoutes.post("/api/auth/login/options", async (c) => {
       .bind(userId)
       .all<{ id: string; transports: string }>()
     : null;
-  const options = await generateAuthenticationOptions({
+  const ceremony = await beginAuthenticationCeremony(c.env.DB, {
     rpID,
-    userVerification: "required",
+    userId,
     allowCredentials: credentials?.results.map((credential) => ({
       id: credential.id,
       transports: parseTransports(credential.transports),
     })),
   });
-  await storeCeremony(c, options.challenge, "login", userId);
-  return c.json(options);
+  setCookie(c, CEREMONY_COOKIE, ceremony.id, cookieOptions(c, CEREMONY_TTL_SECONDS, "/api/auth"));
+  return c.json(ceremony.options);
 });
 
 authRoutes.post("/api/auth/login/verify", async (c) => {
@@ -271,49 +273,24 @@ async function beginRegistration(
   c: AppContext,
   userId: string,
   kind: "register" | "add-passkey",
-  excludeCredentials: { id: string; transports?: AuthenticatorTransportFuture[] }[],
+  excludeCredentials: { id: string; transports?: ReturnType<typeof parseTransports> }[],
 ) {
   const { rpID } = relyingParty(c);
-  const options = await generateRegistrationOptions({
+  const ceremony = await beginRegistrationCeremony(c.env.DB, {
     rpName: c.env.RP_NAME ?? "Pastekey",
     rpID,
-    userID: fromBase64Url(userId),
-    userName: `pastekey-${userId.slice(0, 8)}`,
-    userDisplayName: "Pastekey user",
-    attestationType: "none",
+    userId,
+    kind,
     excludeCredentials,
-    authenticatorSelection: { residentKey: "required", userVerification: "required" },
-    supportedAlgorithmIDs: [-7, -257],
   });
-  await storeCeremony(c, options.challenge, kind, userId);
-  return c.json(options);
-}
-
-async function storeCeremony(
-  c: AppContext,
-  challenge: string,
-  kind: ChallengeRow["kind"],
-  userId: string | null,
-) {
-  const id = randomId();
-  const now = Date.now();
-  await c.env.DB.batch([
-    c.env.DB.prepare("DELETE FROM auth_challenges WHERE expires_at <= ?").bind(now),
-    c.env.DB.prepare(
-      "INSERT INTO auth_challenges (id, challenge, kind, user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-    ).bind(id, challenge, kind, userId, now, now + CEREMONY_TTL_SECONDS * 1000),
-  ]);
-  setCookie(c, CEREMONY_COOKIE, id, cookieOptions(c, CEREMONY_TTL_SECONDS, "/api/auth"));
+  setCookie(c, CEREMONY_COOKIE, ceremony.id, cookieOptions(c, CEREMONY_TTL_SECONDS, "/api/auth"));
+  return c.json(ceremony.options);
 }
 
 async function getCeremony(c: AppContext, kinds: ChallengeRow["kind"][]) {
   const id = getCookie(c, CEREMONY_COOKIE);
   if (!id) return null;
-  const row = await c.env.DB.prepare("SELECT * FROM auth_challenges WHERE id = ? AND expires_at > ?")
-    .bind(id, Date.now())
-    .first<ChallengeRow>();
-  if (!row || !kinds.includes(row.kind)) return null;
-  return row;
+  return findCeremony(c.env.DB, id, kinds);
 }
 
 function validWrappedKey(value: WrappedKey | null | undefined): value is WrappedKey {
