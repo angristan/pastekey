@@ -142,7 +142,7 @@ export function Dashboard({
         <Brand />
         <div className="header-actions">
           <span className="encrypted-state"><CheckIcon weight="bold" /> Vault unlocked</span>
-          <Button size="sm" icon={KeyIcon} loading={addingPasskey} onClick={addPasskey}>Add passkey</Button>
+          <Button className="desktop-add-passkey" size="sm" icon={KeyIcon} loading={addingPasskey} onClick={addPasskey}>Add passkey</Button>
           <GitHubLink />
           <Button size="sm" variant="ghost" icon={SignOutIcon} disabled={creator !== null} onClick={onLogout}>Sign out</Button>
         </div>
@@ -240,6 +240,16 @@ export function Dashboard({
             <PasteCard key={paste.stored.id} paste={paste} onShare={() => sharePaste(paste)} onDelete={() => deletePaste(paste)} />
           ))
         )}
+      </section>
+
+      <section className="mobile-passkey-management" aria-label="Passkey management">
+        <div>
+          <strong>Backup passkey</strong>
+          <span>Add another way to unlock this vault.</span>
+        </div>
+        <Button size="sm" icon={KeyIcon} loading={addingPasskey} onClick={addPasskey}>
+          Add backup passkey
+        </Button>
       </section>
 
       <section className="account-management" aria-label="Account management">

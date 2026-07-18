@@ -384,6 +384,7 @@ a { color: inherit; }
 .empty-card h2 { margin: 13px 0 4px; font-size: 23px; }
 .empty-card p { max-width: 500px; margin: 0 0 22px; color: var(--muted); line-height: 1.6; }
 
+.mobile-passkey-management { display: none; }
 .account-management {
   display: flex;
   align-items: center;
@@ -394,9 +395,9 @@ a { color: inherit; }
   border-top: 1px solid var(--line);
   color: var(--muted);
 }
-.account-management > div { display: grid; gap: 3px; }
-.account-management strong { color: var(--ink); font-size: 13px; }
-.account-management span { font-size: 12px; }
+.account-management > div, .mobile-passkey-management > div { display: grid; gap: 3px; }
+.account-management strong, .mobile-passkey-management strong { color: var(--ink); font-size: 13px; }
+.account-management span, .mobile-passkey-management span { font-size: 12px; }
 .delete-account-button { color: #9d2929 !important; }
 
 .status { min-height: 60vh; display: flex; align-items: center; justify-content: center; gap: 11px; color: var(--muted); font-size: 14px; }
@@ -433,9 +434,20 @@ a { color: inherit; }
   .hero { min-height: auto; padding: 54px 0 70px; gap: 60px; }
   .hero h1 { font-size: 53px; }
   .security-visual { min-height: 280px; }
-  .header-actions .encrypted-state, .header-actions > button:nth-of-type(1) { display: none; }
+  .header-actions .encrypted-state, .desktop-add-passkey { display: none; }
   .dashboard-head { padding-top: 45px; align-items: stretch; }
-  .account-management { align-items: flex-start; flex-direction: column; }
+  .mobile-passkey-management {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 56px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .account-management { align-items: flex-start; flex-direction: column; margin-top: 24px; }
   .create-picker, .composer-card { padding: 19px !important; }
   .create-picker-heading { align-items: flex-end; }
   .create-choice-grid { grid-template-columns: 1fr; }
