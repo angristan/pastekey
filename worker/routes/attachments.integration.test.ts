@@ -35,6 +35,31 @@ describe("authenticated attachment routes", () => {
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
   });
 
+  it("rejects a file identity reserved by pending deletion", async () => {
+    await bindings.DB.prepare(
+      `INSERT INTO deletion_jobs (id, owner_id, object_key, ciphertext_size, created_at, queued_at)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+    )
+      .bind(fileId, userId, objectKey, 32, Date.now())
+      .run();
+
+    const response = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/files/${fileId}`, {
+      method: "PUT",
+      headers: {
+        Cookie: `pk_session=${token}`,
+        "X-Pastekey-Content-IV": "AA",
+        "X-Pastekey-Wrapped-Key": "AA",
+        "X-Pastekey-Wrapped-Key-IV": "AA",
+        "X-Pastekey-Metadata": "AA",
+        "X-Pastekey-Metadata-IV": "AA",
+      },
+      body: new Uint8Array(32),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await bindings.FILES.get(objectKey)).toBeNull();
+  });
+
   it("rejects finalization after account deletion begins", async () => {
     await bindings.DB.prepare(
       "UPDATE users SET deletion_requested_at = ?, deletion_workflow_id = ? WHERE id = ?",

@@ -41,8 +41,16 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
     .first();
   if (!paste) return c.json({ error: "Item not found" }, 404);
 
-  const existing = await c.env.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first();
-  if (existing) return c.json({ error: "Attachment ID already exists" }, 409);
+  const objectKey = `${userId}/${pasteId}/${fileId}`;
+  const existing = await c.env.DB.prepare(
+    `SELECT id FROM attachments WHERE id = ?
+     UNION ALL
+     SELECT id FROM deletion_jobs WHERE id = ? OR object_key = ?
+     LIMIT 1`,
+  )
+    .bind(fileId, fileId, objectKey)
+    .first();
+  if (existing) return c.json({ error: "Attachment ID is already reserved" }, 409);
 
   const [fileCount, storage] = await Promise.all([
     c.env.DB.prepare("SELECT COUNT(*) AS count FROM attachments WHERE paste_id = ?")
@@ -65,7 +73,6 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
   }
   if (!c.req.raw.body) return c.json({ error: "Encrypted file body is required" }, 400);
 
-  const objectKey = `${userId}/${pasteId}/${fileId}`;
   await c.env.FILES.put(objectKey, c.req.raw.body, {
     httpMetadata: { contentType: "application/octet-stream" },
   });
