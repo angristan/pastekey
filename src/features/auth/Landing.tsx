@@ -5,7 +5,7 @@ import { FingerprintIcon, KeyIcon, LockKeyIcon, PlusIcon } from "@phosphor-icons
 import { useState } from "react";
 
 import { Brand, GitHubLink } from "../../components/Brand";
-import type { AppConfig } from "../../lib/types";
+import type { AppConfig } from "../../../shared/protocol/config";
 import { Turnstile } from "./Turnstile";
 
 export function Landing({

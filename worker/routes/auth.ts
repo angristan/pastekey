@@ -10,7 +10,7 @@ import {
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
-import type { AuthSuccess, MeResponse, WrappedKey } from "../../src/lib/types";
+import type { AuthSuccess, MeResponse, WrappedKey } from "../../shared/protocol/auth";
 import { relyingParty } from "../lib/config";
 import { fromBase64Url, randomId, toBase64Url } from "../lib/encoding";
 import {

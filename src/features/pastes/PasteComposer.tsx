@@ -10,7 +10,9 @@ import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "rea
 import { api, ApiError, jsonBody } from "../../lib/api";
 import { encryptAttachment, encryptNewPaste } from "../../lib/crypto";
 import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
-import type { AppConfig, ItemKind, StoredAttachment } from "../../lib/types";
+import type { StoredAttachment } from "../../../shared/protocol/attachments";
+import type { AppConfig } from "../../../shared/protocol/config";
+import type { ItemKind } from "../../../shared/protocol/pastes";
 import { uploadWithRetry } from "../../lib/uploads";
 
 type UploadPhase = "pending" | "encrypting" | "uploading" | "retrying" | "complete" | "error";

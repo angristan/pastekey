@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 
-import type { AppConfig } from "../src/lib/types";
+import type { AppConfig } from "../shared/protocol/config";
 import { OPAQUE_ID, serviceLimits } from "./lib/config";
 import { RequestBodyTooLargeError } from "./lib/http";
 import { recordApiAnalytics } from "./middleware/analytics";

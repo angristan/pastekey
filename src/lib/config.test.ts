@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { appConfig } from "./config";
-import type { AppConfig } from "./types";
+import type { AppConfig } from "../../shared/protocol/config";
 
 const config: AppConfig = {
   limits: {

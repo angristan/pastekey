@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 
-import type { StoredPaste } from "../../src/lib/types";
+import type { PasteWrite, StoredPaste } from "../../shared/protocol/pastes";
 import { MAX_CIPHERTEXT_LENGTH, OPAQUE_ID, serviceLimits } from "../lib/config";
 import { normalizeExpiry, PASTE_JSON_BODY_BYTES, readJson, validExpiry, validOpaque } from "../lib/http";
 import { enqueuePendingDeletions } from "../services/deletions";
 import { requireUser } from "../services/sessions";
-import type { AppContext, AppEnv, PasteWrite } from "../types";
+import type { AppContext, AppEnv } from "../types";
 
 export const pasteRoutes = new Hono<AppEnv>();
 

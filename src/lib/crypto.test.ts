@@ -16,7 +16,8 @@ import {
   unwrapAccountKey,
   wrapAccountKey,
 } from "./crypto";
-import { itemKindOf, type PastePayload, type StoredAttachment, type StoredPaste, type StoredShare } from "./types";
+import type { StoredAttachment } from "../../shared/protocol/attachments";
+import { itemKindOf, type PastePayload, type StoredPaste, type StoredShare } from "../../shared/protocol/pastes";
 
 const payload: PastePayload = {
   title: "Production notes",

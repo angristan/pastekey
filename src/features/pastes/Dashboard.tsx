@@ -19,7 +19,9 @@ import { api, jsonBody } from "../../lib/api";
 import { createShareEnvelope, decryptOwnedPaste } from "../../lib/crypto";
 import { messageOf } from "../../lib/format";
 import { settledValues } from "../../lib/settled";
-import { itemKindOf, type AppConfig, type ItemKind, type MeResponse, type StoredPaste } from "../../lib/types";
+import type { MeResponse } from "../../../shared/protocol/auth";
+import type { AppConfig } from "../../../shared/protocol/config";
+import { itemKindOf, type ItemKind, type StoredPaste } from "../../../shared/protocol/pastes";
 import { PasteCard } from "./PasteCard";
 import type { UnlockedPaste } from "./types";
 

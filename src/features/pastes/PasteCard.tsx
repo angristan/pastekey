@@ -21,7 +21,8 @@ import { downloadAttachment, type UnlockedAttachment } from "../../lib/attachmen
 import { decryptAttachmentMetadata } from "../../lib/crypto";
 import { formatBytes, formatDate, formatExpiry, messageOf } from "../../lib/format";
 import { settledValues } from "../../lib/settled";
-import { itemKindOf, type StoredAttachment } from "../../lib/types";
+import type { StoredAttachment } from "../../../shared/protocol/attachments";
+import { itemKindOf } from "../../../shared/protocol/pastes";
 import { mergeShares, type GeneratedShare, type ShareSummary } from "./share-state";
 import type { UnlockedPaste } from "./types";
 

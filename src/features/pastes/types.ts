@@ -1,4 +1,4 @@
-import type { PastePayload, StoredPaste } from "../../lib/types";
+import type { PastePayload, StoredPaste } from "../../../shared/protocol/pastes";
 
 export type UnlockedPaste = {
   stored: StoredPaste;

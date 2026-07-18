@@ -1,4 +1,4 @@
-import type { PastePayload, StoredPaste, StoredShare } from "../lib/types";
+import type { PastePayload, StoredPaste, StoredShare } from "../../shared/protocol/pastes";
 import {
   AES_GCM,
   PASTE_KEY_USAGES,

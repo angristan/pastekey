@@ -1,4 +1,4 @@
-import type { WrappedKey } from "../lib/types";
+import type { WrappedKey } from "../../shared/protocol/auth";
 
 export const encoder = new TextEncoder();
 export const decoder = new TextDecoder();

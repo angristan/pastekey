@@ -1,4 +1,4 @@
-import type { AttachmentMetadata, StoredAttachment } from "../lib/types";
+import type { AttachmentMetadata, StoredAttachment } from "../../shared/protocol/attachments";
 import {
   AES_GCM,
   decoder,

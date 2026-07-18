@@ -1,4 +1,4 @@
-import type { StoredAttachment } from "../../src/lib/types";
+import type { StoredAttachment } from "../../shared/protocol/attachments";
 import { validOpaque } from "../lib/http";
 import type { AppContext } from "../types";
 

@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 
-import type { StoredShare } from "../../src/lib/types";
+import type { ShareWrite, StoredShare } from "../../shared/protocol/pastes";
 import { OPAQUE_ID } from "../lib/config";
 import { normalizeExpiry, readJson, SMALL_JSON_BODY_BYTES, validOpaque } from "../lib/http";
 import { listAttachments, streamR2Object } from "../repositories/attachments";
 import { requireUser } from "../services/sessions";
-import type { AppEnv, ShareWrite } from "../types";
+import type { AppEnv } from "../types";
 
 export const shareRoutes = new Hono<AppEnv>();
 

@@ -15,7 +15,7 @@ import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata, decryptSharedPaste } from "../../lib/crypto";
 import { formatDate, messageOf } from "../../lib/format";
 import { settledValues } from "../../lib/settled";
-import { itemKindOf, type PastePayload, type StoredShare } from "../../lib/types";
+import { itemKindOf, type PastePayload, type StoredShare } from "../../../shared/protocol/pastes";
 
 const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
 

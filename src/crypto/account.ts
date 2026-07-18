@@ -1,4 +1,4 @@
-import type { WrappedKey } from "../lib/types";
+import type { WrappedKey } from "../../shared/protocol/auth";
 import {
   AES_GCM,
   PASTE_KEY_USAGES,

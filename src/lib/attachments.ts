@@ -1,5 +1,5 @@
 import { decryptAttachmentContent } from "./crypto";
-import type { AttachmentMetadata, StoredAttachment } from "./types";
+import type { AttachmentMetadata, StoredAttachment } from "../../shared/protocol/attachments";
 
 export type UnlockedAttachment = {
   stored: StoredAttachment;

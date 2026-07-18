@@ -15,7 +15,7 @@ import {
   unwrapAccountKey,
   wrapAccountKey,
 } from "./crypto";
-import type { AuthSuccess } from "./types";
+import type { AuthSuccess } from "../../shared/protocol/auth";
 
 type PrfOutputs = {
   prf?: {

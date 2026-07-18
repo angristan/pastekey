@@ -4,7 +4,8 @@ import { CenteredStatus } from "./components/CenteredStatus";
 import { api } from "./lib/api";
 import { appConfig } from "./lib/config";
 import { messageOf } from "./lib/format";
-import type { AppConfig, MeResponse } from "./lib/types";
+import type { MeResponse } from "../shared/protocol/auth";
+import type { AppConfig } from "../shared/protocol/config";
 
 const Landing = lazy(() => import("./features/auth/Landing").then((module) => ({ default: module.Landing })));
 const LockedVault = lazy(() => import("./features/auth/LockedVault").then((module) => ({ default: module.LockedVault })));

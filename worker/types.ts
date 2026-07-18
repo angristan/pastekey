@@ -71,19 +71,3 @@ export type CredentialRow = {
   wrapped_account_key: string;
   wrapped_account_key_iv: string;
 };
-
-export type PasteWrite = {
-  id: string;
-  ciphertext: string;
-  contentIv: string;
-  wrappedKey: string;
-  wrappedKeyIv: string;
-  expiresAt?: number | null;
-};
-
-export type ShareWrite = {
-  id: string;
-  wrappedKey: string;
-  wrappedKeyIv: string;
-  expiresAt?: number | null;
-};

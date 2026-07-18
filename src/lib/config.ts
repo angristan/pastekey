@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { AppConfig } from "./types";
+import type { AppConfig } from "../../shared/protocol/config";
 
 let configPromise: Promise<AppConfig> | undefined;
 
