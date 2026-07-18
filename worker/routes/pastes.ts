@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import type { StoredPaste } from "../../src/lib/types";
 import { MAX_CIPHERTEXT_LENGTH, OPAQUE_ID, serviceLimits } from "../lib/config";
-import { normalizeExpiry, readJson, validExpiry, validOpaque } from "../lib/http";
+import { normalizeExpiry, PASTE_JSON_BODY_BYTES, readJson, validExpiry, validOpaque } from "../lib/http";
 import { enqueuePendingDeletions } from "../services/deletions";
 import { requireUser } from "../services/sessions";
 import type { AppContext, AppEnv, PasteWrite } from "../types";
@@ -30,7 +30,7 @@ pasteRoutes.get("/api/pastes/:id", requireUser, async (c) => {
 });
 
 pasteRoutes.post("/api/pastes", requireUser, async (c) => {
-  const body = await readJson<PasteWrite>(c);
+  const body = await readJson<PasteWrite>(c, PASTE_JSON_BODY_BYTES);
   if (!validPasteWrite(body)) return c.json({ error: "Invalid encrypted item" }, 400);
 
   const now = Date.now();
@@ -74,7 +74,7 @@ pasteRoutes.post("/api/pastes", requireUser, async (c) => {
 });
 
 pasteRoutes.put("/api/pastes/:id", requireUser, async (c) => {
-  const body = await readJson<Omit<PasteWrite, "id">>(c);
+  const body = await readJson<Omit<PasteWrite, "id">>(c, PASTE_JSON_BODY_BYTES);
   const id = c.req.param("id")!;
   if (!validPasteWrite(body ? { ...body, id } : null)) return c.json({ error: "Invalid encrypted item" }, 400);
 

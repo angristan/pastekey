@@ -3,6 +3,7 @@ import { secureHeaders } from "hono/secure-headers";
 
 import type { AppConfig } from "../src/lib/types";
 import { serviceLimits } from "./lib/config";
+import { RequestBodyTooLargeError } from "./lib/http";
 import { recordApiAnalytics } from "./middleware/analytics";
 import { rateLimitMutations } from "./middleware/rate-limit";
 import { accountRoutes } from "./routes/account";
@@ -47,6 +48,9 @@ app.route("/", shareRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((error, c) => {
+  if (error instanceof RequestBodyTooLargeError) {
+    return c.json({ error: "Request body too large" }, 413);
+  }
   console.error("Unhandled API error", error);
   return c.json({ error: "Unexpected server error" }, 500);
 });

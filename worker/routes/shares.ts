@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import type { StoredShare } from "../../src/lib/types";
 import { OPAQUE_ID } from "../lib/config";
-import { normalizeExpiry, readJson, validOpaque } from "../lib/http";
+import { normalizeExpiry, readJson, SMALL_JSON_BODY_BYTES, validOpaque } from "../lib/http";
 import { listAttachments, streamR2Object } from "../repositories/attachments";
 import { requireUser } from "../services/sessions";
 import type { AppEnv, ShareWrite } from "../types";
@@ -25,7 +25,7 @@ shareRoutes.get("/api/pastes/:id/shares", requireUser, async (c) => {
 });
 
 shareRoutes.post("/api/pastes/:id/shares", requireUser, async (c) => {
-  const body = await readJson<ShareWrite>(c);
+  const body = await readJson<ShareWrite>(c, SMALL_JSON_BODY_BYTES);
   if (!body || !OPAQUE_ID.test(body.id) || !validOpaque(body.wrappedKey) || !validOpaque(body.wrappedKeyIv)) {
     return c.json({ error: "Invalid encrypted share" }, 400);
   }

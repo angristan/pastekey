@@ -13,7 +13,13 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AuthSuccess, MeResponse, WrappedKey } from "../../src/lib/types";
 import { relyingParty } from "../lib/config";
 import { fromBase64Url, randomId, toBase64Url } from "../lib/encoding";
-import { parseTransports, readJson, validOpaque } from "../lib/http";
+import {
+  parseTransports,
+  readJson,
+  SMALL_JSON_BODY_BYTES,
+  validOpaque,
+  WEBAUTHN_JSON_BODY_BYTES,
+} from "../lib/http";
 import {
   cookieOptions,
   createSession,
@@ -33,7 +39,7 @@ authRoutes.post("/api/auth/register/options", async (c) => {
   const existing = await currentUser(c);
   if (existing) return c.json({ error: "Already signed in" }, 409);
 
-  const body = await readJson<{ turnstileToken?: string }>(c);
+  const body = await readJson<{ turnstileToken?: string }>(c, SMALL_JSON_BODY_BYTES);
   const turnstile = await verifyTurnstile(c, body?.turnstileToken);
   if (!turnstile.ok) return c.json({ error: turnstile.error }, turnstile.status);
 
@@ -56,7 +62,7 @@ authRoutes.post("/api/auth/register/verify", async (c) => {
   const ceremony = await getCeremony(c, ["register", "add-passkey"]);
   if (!ceremony) return c.json({ error: "Registration ceremony expired" }, 400);
 
-  const body = await readJson<{ credential: RegistrationResponseJSON; wrappedAccountKey: WrappedKey }>(c);
+  const body = await readJson<{ credential: RegistrationResponseJSON; wrappedAccountKey: WrappedKey }>(c, WEBAUTHN_JSON_BODY_BYTES);
   if (!body || !validWrappedKey(body.wrappedAccountKey)) {
     return c.json({ error: "Invalid registration response" }, 400);
   }
@@ -155,7 +161,7 @@ authRoutes.post("/api/auth/login/verify", async (c) => {
   const ceremony = await getCeremony(c, ["login"]);
   if (!ceremony) return c.json({ error: "Sign-in ceremony expired" }, 400);
 
-  const body = await readJson<{ credential: AuthenticationResponseJSON }>(c);
+  const body = await readJson<{ credential: AuthenticationResponseJSON }>(c, WEBAUTHN_JSON_BODY_BYTES);
   if (!body?.credential?.id) return c.json({ error: "Invalid sign-in response" }, 400);
 
   const stored = await c.env.DB.prepare(
