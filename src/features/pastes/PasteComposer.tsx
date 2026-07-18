@@ -7,34 +7,12 @@ import { Select } from "@cloudflare/kumo/components/select";
 import { ArrowClockwiseIcon, FileIcon, LockKeyIcon, PaperclipIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 
-import { api, ApiError, jsonBody } from "../../lib/api";
-import { encryptAttachment, encryptNewPaste } from "../../lib/crypto";
-import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
-import type { StoredAttachment } from "../../../shared/protocol/attachments";
 import type { AppConfig } from "../../../shared/protocol/config";
 import type { ItemKind } from "../../../shared/protocol/pastes";
-import { uploadWithRetry } from "../../lib/uploads";
-
-type UploadPhase = "pending" | "encrypting" | "uploading" | "retrying" | "complete" | "error";
-type EncryptedAttachment = Awaited<ReturnType<typeof encryptAttachment>>;
-
-type SelectedFile = {
-  id: string;
-  file: File;
-  phase: UploadPhase;
-  progress: number;
-  attempt?: number;
-  maxAttempts?: number;
-  error?: string;
-  encrypted?: EncryptedAttachment;
-};
-
-type UploadSession = {
-  pasteId: string;
-  pasteKey: CryptoKey;
-};
-
-let nextSelectionId = 0;
+import { api, ApiError, jsonBody } from "../../lib/api";
+import { encryptNewPaste } from "../../lib/crypto";
+import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
+import { type SelectedFile, useUploadSession } from "./useUploadSession";
 
 export function PasteComposer({
   accountKey,
@@ -53,12 +31,19 @@ export function PasteComposer({
   const [content, setContent] = useState("");
   const [language, setLanguage] = useState("text");
   const [expiry, setExpiry] = useState<Expiry>("week");
-  const [files, setFiles] = useState<SelectedFile[]>([]);
   const [showAttachments, setShowAttachments] = useState(kind === "files");
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
-  const [uploadSession, setUploadSession] = useState<UploadSession | null>(null);
+  const {
+    appendFiles,
+    beginSession,
+    files,
+    finishSession,
+    removeFile,
+    session: uploadSession,
+    uploadFile,
+  } = useUploadSession();
   const [error, setError] = useState<string | null>(null);
   const dragDepth = useRef(0);
 
@@ -84,15 +69,7 @@ export function PasteComposer({
       return;
     }
     setError(null);
-    setFiles((current) => [
-      ...current,
-      ...selected.map((file) => ({
-        id: `selected-${Date.now()}-${nextSelectionId++}`,
-        file,
-        phase: "pending" as const,
-        progress: 0,
-      })),
-    ]);
+    appendFiles(selected);
   }
 
   function enterDropzone(event: DragEvent<HTMLLabelElement>) {
@@ -115,56 +92,8 @@ export function PasteComposer({
     addFiles(Array.from(event.dataTransfer.files));
   }
 
-  function updateFile(id: string, patch: Partial<SelectedFile>) {
-    setFiles((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
-  }
-
-  async function uploadFile(selected: SelectedFile, session: UploadSession) {
-    updateFile(selected.id, { progress: 0, error: undefined, attempt: undefined, maxAttempts: undefined });
-    try {
-      let attachment = selected.encrypted;
-      if (!attachment) {
-        updateFile(selected.id, { phase: "encrypting" });
-        attachment = await encryptAttachment(session.pasteKey, session.pasteId, selected.file);
-        updateFile(selected.id, { encrypted: attachment });
-      }
-      updateFile(selected.id, { phase: "uploading" });
-      await uploadWithRetry(
-        `/api/pastes/${session.pasteId}/files/${attachment.id}`,
-        attachment.body,
-        attachment.headers,
-        {
-          onProgress: (loaded, reportedTotal) => {
-            const total = reportedTotal || attachment.body.byteLength;
-            updateFile(selected.id, {
-              phase: "uploading",
-              progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
-            });
-          },
-          onRetry: (attempt, maxAttempts) => updateFile(selected.id, {
-            phase: "retrying",
-            progress: 0,
-            attempt,
-            maxAttempts,
-          }),
-          confirmConflict: async () => {
-            const result = await api<{ attachments: StoredAttachment[] }>(
-              `/api/pastes/${session.pasteId}/files`,
-            );
-            return result.attachments.some(({ id }) => id === attachment.id);
-          },
-        },
-      );
-      updateFile(selected.id, { phase: "complete", progress: 100, attempt: undefined, maxAttempts: undefined });
-      return true;
-    } catch (cause) {
-      updateFile(selected.id, { phase: "error", progress: 0, error: messageOf(cause) });
-      return false;
-    }
-  }
-
   async function finishCreation() {
-    setUploadSession(null);
+    finishSession();
     setProgress("Refreshing vault…");
     await onCreated();
   }
@@ -225,7 +154,7 @@ export function PasteComposer({
       }
 
       const session = { pasteId: encrypted.write.id, pasteKey: encrypted.pasteKey };
-      setUploadSession(session);
+      beginSession(session);
       setProgress(null);
       let failures = 0;
       for (const selected of files) {
@@ -256,11 +185,11 @@ export function PasteComposer({
     setError(null);
     try {
       await api<void>(`/api/pastes/${uploadSession.pasteId}`, { method: "DELETE" });
-      setUploadSession(null);
+      finishSession();
       onCancel();
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 404) {
-        setUploadSession(null);
+        finishSession();
         onCancel();
       } else {
         setError(messageOf(cause));
@@ -399,7 +328,7 @@ export function PasteComposer({
                           icon={XIcon}
                           disabled={saving}
                           aria-label={`Remove ${selected.file.name}`}
-                          onClick={() => setFiles((current) => current.filter((item) => item.id !== selected.id))}
+                          onClick={() => removeFile(selected.id)}
                         />
                       )}
                     </div>
