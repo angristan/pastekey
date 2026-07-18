@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pastekey",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [
+    {
+      "pattern": "paste.stanislas.cloud",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pastekey",
+      "database_id": "bc7d0b98-c44a-4709-af96-8bf569fa2faf",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "ORIGIN": "https://paste.stanislas.cloud",
+    "RP_ID": "paste.stanislas.cloud",
+    "RP_NAME": "Pastekey"
+  }
+}
