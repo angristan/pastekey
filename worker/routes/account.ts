@@ -1,5 +1,9 @@
 import { Hono } from "hono";
 
+import {
+  accountDeletionWorkflowId,
+  startAccountDeletionWorkflow,
+} from "../services/account-deletions";
 import { destroySession, requireUser } from "../services/sessions";
 import type { AppEnv } from "../types";
 
@@ -19,22 +23,7 @@ accountRoutes.delete("/api/account", requireUser, async (c) => {
   ]);
   if (!results[0]?.meta.changes) return c.json({ error: "Account deletion is already in progress" }, 409);
 
-  try {
-    await c.env.ACCOUNT_DELETION.create({
-      id: workflowId,
-      params: { userId },
-      retention: { successRetention: "1 day", errorRetention: "3 days" },
-    });
-  } catch {
-    // Workflow creation can succeed remotely even if its response is lost. Keep the durable
-    // deletion intent so scheduled reconciliation can safely recover either outcome.
-    console.error("Account deletion workflow start is awaiting reconciliation");
-  }
-
+  await startAccountDeletionWorkflow(c.env, userId, workflowId);
   await destroySession(c);
   return c.json({ status: "deleting" }, 202);
 });
-
-export function accountDeletionWorkflowId(userId: string) {
-  return `account-${userId}`;
-}

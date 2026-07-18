@@ -10,6 +10,7 @@ import { attachmentRoutes } from "./routes/attachments";
 import { authRoutes } from "./routes/auth";
 import { pasteRoutes } from "./routes/pastes";
 import { shareRoutes } from "./routes/shares";
+import { reconcileAccountDeletions } from "./services/account-deletions";
 import { cleanupExpired } from "./services/cleanup";
 import { consumeDeletionQueue } from "./services/deletions";
 import type { AppEnv, Bindings, DeletionMessage } from "./types";
@@ -57,5 +58,6 @@ export default {
   },
   scheduled(_controller, env, context) {
     context.waitUntil(cleanupExpired(env));
+    context.waitUntil(reconcileAccountDeletions(env));
   },
 } satisfies ExportedHandler<Bindings, DeletionMessage>;

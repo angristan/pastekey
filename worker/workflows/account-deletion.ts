@@ -17,6 +17,11 @@ type DeletionTarget = {
 
 export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, AccountDeletionPayload> {
   async run(event: Readonly<WorkflowEvent<AccountDeletionPayload>>, step: WorkflowStep) {
+    const ownsAccount = await step.do("verify deletion ownership", async () =>
+      Boolean(await ownsAccountDeletion(this.env.DB, event.payload.userId, event.instanceId)),
+    );
+    if (!ownsAccount) return { deleted: false };
+
     let drained = false;
 
     for (let batch = 1; batch <= MAX_DELETION_STEPS; batch += 1) {
@@ -60,13 +65,7 @@ export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, Accoun
 }
 
 async function deleteCiphertextBatch(env: Bindings, userId: string, workflowId: string) {
-  const owner = await env.DB.prepare(
-    `SELECT id FROM users
-     WHERE id = ? AND deletion_workflow_id = ? AND deletion_requested_at IS NOT NULL`,
-  )
-    .bind(userId, workflowId)
-    .first();
-  if (!owner) return 0;
+  if (!(await ownsAccountDeletion(env.DB, userId, workflowId))) return 0;
 
   const rows = await env.DB.prepare(
     `SELECT id, objectKey, source FROM (
@@ -99,6 +98,15 @@ async function deleteCiphertextBatch(env: Bindings, userId: string, workflowId: 
   }
   await env.DB.batch(statements);
   return objectKeys.length;
+}
+
+function ownsAccountDeletion(db: D1Database, userId: string, workflowId: string) {
+  return db.prepare(
+    `SELECT id FROM users
+     WHERE id = ? AND deletion_workflow_id = ? AND deletion_requested_at IS NOT NULL`,
+  )
+    .bind(userId, workflowId)
+    .first();
 }
 
 async function countDeletionTargets(db: D1Database, userId: string) {

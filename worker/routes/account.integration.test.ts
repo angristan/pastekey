@@ -3,7 +3,8 @@ import { createExecutionContext, introspectWorkflow, SELF } from "cloudflare:tes
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hashToken } from "../lib/encoding";
-import { accountDeletionWorkflowId, accountRoutes } from "./account";
+import { accountDeletionWorkflowId } from "../services/account-deletions";
+import { accountRoutes } from "./account";
 import type { Bindings } from "../types";
 
 const bindings = env as unknown as Bindings;
