@@ -39,6 +39,28 @@ Passkey PRF ──HKDF──> passkey wrapping key
 - SimpleWebAuthn server verification
 - Browser WebCrypto only for content encryption
 
+## Architecture
+
+```text
+src/
+├── components/          # Shared presentation
+├── features/
+│   ├── auth/            # Landing, locked state, Turnstile
+│   ├── pastes/          # Dashboard, composer, paste management
+│   └── sharing/         # Public shared-paste experience
+└── lib/                 # API client, crypto, attachments, formatting, protocol types
+
+worker/
+├── routes/              # Auth, paste, attachment, and sharing HTTP boundaries
+├── middleware/          # Cross-cutting request policy
+├── repositories/        # D1/R2 persistence adapters
+├── services/            # Sessions, Turnstile, retention cleanup
+├── lib/                 # Validation, encoding, and configuration
+└── index.ts             # Composition root only
+```
+
+Cryptography and wire-format types remain independent of React. Worker routes own HTTP concerns while reusable infrastructure stays outside route modules.
+
 ## Develop
 
 Requirements: Bun and a browser/passkey provider supporting the WebAuthn PRF extension.
