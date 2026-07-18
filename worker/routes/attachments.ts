@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import { OPAQUE_ID, serviceLimits } from "../lib/config";
 import { readAttachmentHeaders, streamR2Object } from "../lib/attachments-http";
-import { listAttachments } from "../repositories/attachments";
+import { listActiveOwnedAttachments, listAttachments } from "../repositories/attachments";
 import { findActiveOwnedPaste } from "../repositories/pastes";
 import { uploadAttachment } from "../services/attachment-upload";
 import { enqueuePendingDeletions, stageDeletion } from "../services/deletions";
@@ -10,6 +10,11 @@ import { requireUser } from "../services/sessions";
 import type { AppEnv } from "../types";
 
 export const attachmentRoutes = new Hono<AppEnv>();
+
+attachmentRoutes.get("/api/attachments", requireUser, async (c) => {
+  const attachments = await listActiveOwnedAttachments(c.env.DB, c.get("userId"));
+  return c.json({ attachments });
+});
 
 attachmentRoutes.get("/api/pastes/:id/files", requireUser, async (c) => {
   const pasteId = c.req.param("id")!;

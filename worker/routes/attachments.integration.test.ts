@@ -171,6 +171,12 @@ describe("authenticated attachment routes", () => {
       attachments: [{ id: fileId, ciphertextSize: ciphertext.byteLength }],
     });
 
+    const vaultIndex = await SELF.fetch("https://paste.test/api/attachments", { headers });
+    expect(vaultIndex.status).toBe(200);
+    await expect(vaultIndex.json()).resolves.toMatchObject({
+      attachments: [{ id: fileId, pasteId, ciphertextSize: ciphertext.byteLength }],
+    });
+
     const download = await SELF.fetch(`${endpoint}/content`, { headers });
     expect(download.status).toBe(200);
     expect(new Uint8Array(await download.arrayBuffer())).toEqual(ciphertext);

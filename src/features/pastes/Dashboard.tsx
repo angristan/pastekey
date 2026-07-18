@@ -17,13 +17,15 @@ import { Brand, GitHubLink } from "../../components/Brand";
 import { CenteredStatus } from "../../components/CenteredStatus";
 import { api, jsonBody } from "../../lib/api";
 import { createShareEnvelope, decryptOwnedPaste } from "../../lib/crypto";
+import { settledMap } from "../../lib/concurrency";
 import { messageOf } from "../../lib/format";
-import { settledValues } from "../../lib/settled";
+import type { StoredAttachment } from "../../../shared/protocol/attachments";
 import type { MeResponse } from "../../../shared/protocol/auth";
 import type { AppConfig } from "../../../shared/protocol/config";
 import { itemKindOf, type ItemKind, type StoredPaste } from "../../../shared/protocol/pastes";
 import { PasteCard } from "./PasteCard";
 import type { UnlockedPaste } from "./types";
+import { unlockAttachments } from "./useUnlockedAttachments";
 
 const PasteComposer = lazy(() => import("./PasteComposer").then((module) => ({ default: module.PasteComposer })));
 
@@ -56,14 +58,33 @@ export function Dashboard({
     setError(null);
     setFailedPasteCount(0);
     try {
-      const result = await api<{ pastes: StoredPaste[] }>("/api/pastes");
-      const unlocked = await settledValues(
-        result.pastes.map(async (stored) => ({ stored, ...(await decryptOwnedPaste(accountKey, stored)) })),
-      );
-      setPastes(unlocked.values);
-      setFailedPasteCount(unlocked.failureCount);
-      if (unlocked.failureCount) {
-        setError(`${unlocked.failureCount} encrypted ${unlocked.failureCount === 1 ? "item could" : "items could"} not be decrypted.`);
+      const [pasteResult, attachmentResult] = await Promise.all([
+        api<{ pastes: StoredPaste[] }>("/api/pastes"),
+        api<{ attachments: StoredAttachment[] }>("/api/attachments"),
+      ]);
+      const unlocked = await settledMap(pasteResult.pastes, 4, async (stored) => ({
+        stored,
+        ...(await decryptOwnedPaste(accountKey, stored)),
+      }));
+      const attachmentsByPaste = new Map<string, StoredAttachment[]>();
+      for (const attachment of attachmentResult.attachments) {
+        const current = attachmentsByPaste.get(attachment.pasteId) ?? [];
+        current.push(attachment);
+        attachmentsByPaste.set(attachment.pasteId, current);
+      }
+      const hydrated = await settledMap(unlocked.values, 4, async (paste) => {
+        const attachments = await unlockAttachments(attachmentsByPaste.get(paste.stored.id) ?? [], paste.pasteKey);
+        return {
+          ...paste,
+          attachments: attachments.values,
+          attachmentFailureCount: attachments.failureCount,
+        };
+      });
+      setPastes(hydrated.values);
+      const failureCount = unlocked.failureCount + hydrated.failureCount;
+      setFailedPasteCount(failureCount);
+      if (failureCount) {
+        setError(`${failureCount} encrypted ${failureCount === 1 ? "item could" : "items could"} not be decrypted.`);
       }
     } catch (cause) {
       setError(messageOf(cause));

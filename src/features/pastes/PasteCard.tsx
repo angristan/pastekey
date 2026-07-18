@@ -50,6 +50,8 @@ export function PasteCard({
     pasteId: paste.stored.id,
     pasteKey: paste.pasteKey,
     loadOnMount: fileItem,
+    initialAttachments: paste.attachments,
+    initialFailureCount: paste.attachmentFailureCount,
     onFailure: setPanelError,
   });
   const {

@@ -126,6 +126,23 @@ export async function stageReservationDeletion(db: D1Database, id: string, now =
   ]);
 }
 
+export async function listActiveOwnedAttachments(db: D1Database, ownerId: string, now = Date.now()) {
+  const rows = await db.prepare(
+    `SELECT a.id, a.paste_id AS pasteId, a.ciphertext_size AS ciphertextSize,
+      a.content_iv AS contentIv, a.wrapped_key AS wrappedKey, a.wrapped_key_iv AS wrappedKeyIv,
+      a.metadata_ciphertext AS metadataCiphertext, a.metadata_iv AS metadataIv, a.created_at AS createdAt
+     FROM attachments a
+     JOIN pastes p ON p.id = a.paste_id
+     JOIN users u ON u.id = p.owner_id
+     WHERE p.owner_id = ? AND u.deletion_requested_at IS NULL
+       AND (p.expires_at IS NULL OR p.expires_at > ?)
+     ORDER BY a.paste_id, a.created_at`,
+  )
+    .bind(ownerId, now)
+    .all<StoredAttachment>();
+  return rows.results;
+}
+
 export async function listAttachments(db: D1Database, pasteId: string) {
   const rows = await db.prepare(
     `SELECT id, paste_id AS pasteId, ciphertext_size AS ciphertextSize, content_iv AS contentIv,
