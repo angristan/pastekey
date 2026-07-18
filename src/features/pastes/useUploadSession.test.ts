@@ -4,7 +4,9 @@ import { ApiError } from "../../lib/api";
 import {
   createUploadPayloadCache,
   discardUploadSession,
+  type SelectedFile,
   uploadSelectedFile,
+  uploadUntilFailure,
 } from "./useUploadSession";
 
 const payload = {
@@ -58,6 +60,22 @@ describe("upload payload ownership", () => {
     expect(encrypt).toHaveBeenCalledTimes(1);
     expect(cache.size).toBe(0);
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ phase: "complete" }));
+  });
+
+  it("stops before encrypting more files after the first failure", async () => {
+    const files = ["first", "failed", "not-started"].map((id) => ({
+      id,
+      file: new File([id], `${id}.txt`),
+      phase: "pending" as const,
+      progress: 0,
+    }));
+    const upload = vi.fn(async (file: SelectedFile) => file.id !== "failed");
+
+    const result = await uploadUntilFailure(files, upload);
+
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(result.attemptedIds).toEqual(new Set(["first", "failed"]));
+    expect(result.failedIds).toEqual(new Set(["failed"]));
   });
 
   it("treats an already removed unfinished item as discarded", async () => {

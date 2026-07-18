@@ -12,7 +12,12 @@ import type { ItemKind } from "../../../shared/protocol/pastes";
 import { api, jsonBody } from "../../lib/api";
 import { encryptNewPaste } from "../../lib/crypto";
 import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
-import { discardUploadSession, type SelectedFile, useUploadSession } from "./useUploadSession";
+import {
+  discardUploadSession,
+  type SelectedFile,
+  uploadUntilFailure,
+  useUploadSession,
+} from "./useUploadSession";
 
 export function PasteComposer({
   accountKey,
@@ -102,14 +107,13 @@ export function PasteComposer({
     if (!uploadSession || targets.length === 0 || saving) return;
     setSaving(true);
     setError(null);
-    const failedIds = new Set<string>();
     try {
-      for (const selected of targets) {
-        if (!(await uploadFile(selected, uploadSession))) failedIds.add(selected.id);
-      }
-      const targetIds = new Set(targets.map((selected) => selected.id));
+      const { attemptedIds, failedIds } = await uploadUntilFailure(
+        targets,
+        (selected) => uploadFile(selected, uploadSession),
+      );
       const remaining = files.filter((selected) =>
-        selected.phase !== "complete" && (!targetIds.has(selected.id) || failedIds.has(selected.id)),
+        selected.phase !== "complete" && (!attemptedIds.has(selected.id) || failedIds.has(selected.id)),
       ).length;
       if (remaining === 0) {
         await finishCreation();
@@ -125,7 +129,7 @@ export function PasteComposer({
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (uploadSession) {
-      await retryFiles(files.filter((selected) => selected.phase === "error"));
+      await retryFiles(files.filter((selected) => selected.phase !== "complete"));
       return;
     }
     if (kind === "paste" && !content.trim()) return setError("Add some paste content.");
@@ -156,15 +160,15 @@ export function PasteComposer({
       const session = { pasteId: encrypted.write.id, pasteKey: encrypted.pasteKey };
       beginSession(session);
       setProgress(null);
-      let failures = 0;
-      for (const selected of files) {
-        if (!(await uploadFile(selected, session))) failures += 1;
+      const { failedIds } = await uploadUntilFailure(
+        files,
+        (selected) => uploadFile(selected, session),
+      );
+      if (failedIds.size) {
+        setError("Upload paused after a file failed. Retry to continue or discard the unfinished item.");
+        return;
       }
-      if (failures === 0) {
-        await finishCreation();
-      } else {
-        setError(`${failures} ${failures === 1 ? "file" : "files"} could not be uploaded. Review the error, then retry or discard.`);
-      }
+      await finishCreation();
     } catch (cause) {
       setError(messageOf(cause));
     } finally {

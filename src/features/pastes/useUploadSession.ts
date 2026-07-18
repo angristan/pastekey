@@ -155,6 +155,22 @@ export async function uploadSelectedFile({
   }
 }
 
+export async function uploadUntilFailure(
+  files: SelectedFile[],
+  upload: (file: SelectedFile) => Promise<boolean>,
+) {
+  const attemptedIds = new Set<string>();
+  const failedIds = new Set<string>();
+  for (const file of files) {
+    attemptedIds.add(file.id);
+    if (!(await upload(file))) {
+      failedIds.add(file.id);
+      break;
+    }
+  }
+  return { attemptedIds, failedIds };
+}
+
 export async function discardUploadSession(
   pasteId: string,
   remove: (pasteId: string) => Promise<void> = async (id) => {
