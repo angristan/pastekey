@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 
 import type { AppConfig } from "../src/lib/types";
-import { serviceLimits } from "./lib/config";
+import { OPAQUE_ID, serviceLimits } from "./lib/config";
 import { RequestBodyTooLargeError } from "./lib/http";
 import { recordApiAnalytics } from "./middleware/analytics";
 import { rateLimitMutations } from "./middleware/rate-limit";
@@ -29,6 +29,19 @@ app.use("/api/*", recordApiAnalytics());
 app.use("/api/auth/*", rateLimitMutations("AUTH_RATE_LIMITER", "auth", ["POST"]));
 app.use("/api/account", rateLimitMutations("WRITE_RATE_LIMITER", "write", ["DELETE"]));
 app.use("/api/pastes/*", rateLimitMutations("WRITE_RATE_LIMITER", "write", ["POST", "PUT", "DELETE"]));
+
+app.on(["GET", "HEAD"], "/s/:id", async (c) => {
+  if (!OPAQUE_ID.test(c.req.param("id"))) return c.json({ error: "Not found" }, 404);
+
+  const assetUrl = new URL("/", c.req.url);
+  const response = await c.env.ASSETS.fetch(new Request(assetUrl, {
+    method: c.req.method,
+    headers: c.req.raw.headers,
+  }));
+  const headers = new Headers(response.headers);
+  headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  return new Response(response.body, { status: response.status, headers });
+});
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 app.get("/api/config", (c) => {

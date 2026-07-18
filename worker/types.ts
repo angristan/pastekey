@@ -6,6 +6,7 @@ export type Bindings = {
   EVENTS: AnalyticsEngineDataset;
   DELETION_QUEUE: Queue<DeletionMessage>;
   ACCOUNT_DELETION: Workflow<AccountDeletionPayload>;
+  ASSETS: Fetcher;
   AUTH_RATE_LIMITER: RateLimit;
   WRITE_RATE_LIMITER: RateLimit;
   MAX_FILE_BYTES?: string;

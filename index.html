@@ -2,11 +2,51 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Passkey-native, end-to-end encrypted text and file sharing." />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Pastekey — Private, encrypted sharing</title>
+    <meta name="description" content="Share text and files with end-to-end encryption and passkeys. Encryption and decryption happen in your browser." />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#f4f2ea" />
+    <meta name="color-scheme" content="light" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="apple-mobile-web-app-title" content="Pastekey" />
+
+    <link rel="canonical" href="https://paste.stanislas.cloud/" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>Pastekey</title>
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Pastekey" />
+    <meta property="og:title" content="Pastekey — Private, encrypted sharing" />
+    <meta property="og:description" content="Share text and files with end-to-end encryption and passkeys. Encryption and decryption happen in your browser." />
+    <meta property="og:url" content="https://paste.stanislas.cloud/" />
+    <meta property="og:image" content="https://paste.stanislas.cloud/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content="Pastekey — private encrypted text and file sharing" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Pastekey — Private, encrypted sharing" />
+    <meta name="twitter:description" content="Share text and files with end-to-end encryption and passkeys. Encryption and decryption happen in your browser." />
+    <meta name="twitter:image" content="https://paste.stanislas.cloud/og-image.png" />
+    <meta name="twitter:image:alt" content="Pastekey — private encrypted text and file sharing" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Pastekey",
+        "url": "https://paste.stanislas.cloud/",
+        "description": "Private, end-to-end encrypted text and file sharing unlocked with passkeys.",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Any",
+        "isAccessibleForFree": true,
+        "browserRequirements": "Requires Web Crypto and a passkey provider supporting WebAuthn PRF.",
+        "sameAs": ["https://github.com/angristan/pastekey"]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
