@@ -1,6 +1,4 @@
 import {
-  verifyAuthenticationResponse,
-  verifyRegistrationResponse,
   type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
@@ -32,11 +30,13 @@ import {
   requireUser,
 } from "../services/sessions";
 import { verifyTurnstile } from "../services/turnstile";
+import { verifyAuthentication, verifyRegistration } from "../services/webauthn";
 import type { AppContext, AppEnv, ChallengeRow, CredentialRow } from "../types";
 
 const CEREMONY_COOKIE = "pk_ceremony";
 
-export const authRoutes = new Hono<AppEnv>();
+export function createAuthRoutes(verifiers = { verifyAuthentication, verifyRegistration }) {
+  const authRoutes = new Hono<AppEnv>();
 
 authRoutes.post("/api/auth/register/options", async (c) => {
   const existing = await currentUser(c);
@@ -73,7 +73,7 @@ authRoutes.post("/api/auth/register/verify", async (c) => {
   const { rpID, origin } = relyingParty(c);
   let verification;
   try {
-    verification = await verifyRegistrationResponse({
+    verification = await verifiers.verifyRegistration({
       response: body.credential,
       expectedChallenge: ceremony.challenge,
       expectedOrigin: origin,
@@ -181,7 +181,7 @@ authRoutes.post("/api/auth/login/verify", async (c) => {
   const { rpID, origin } = relyingParty(c);
   let verification;
   try {
-    verification = await verifyAuthenticationResponse({
+    verification = await verifiers.verifyAuthentication({
       response: body.credential,
       expectedChallenge: ceremony.challenge,
       expectedOrigin: origin,
@@ -268,6 +268,11 @@ authRoutes.delete("/api/auth/passkeys/:id", requireUser, async (c) => {
   if (!exists) return c.json({ error: "Passkey not found" }, 404);
   return c.json({ error: "Keep at least one passkey" }, 409);
 });
+
+  return authRoutes;
+}
+
+export const authRoutes = createAuthRoutes();
 
 async function beginRegistration(
   c: AppContext,
