@@ -27,6 +27,7 @@ Passkey PRF ──HKDF──> passkey wrapping key
 - Share links contain a random secret after `#`; URL fragments are not sent to the server. A new link is shown for copying only in the browser session that created it.
 - Revoking a share deletes its wrapped paste-key envelope. It cannot revoke plaintext already copied by a recipient.
 - D1 and R2 still expose metadata: account/paste/file counts, timestamps, ciphertext sizes, expiry, and access metadata.
+- Analytics Engine records only fixed operation names, outcomes, coarse encrypted-file size buckets, duration, and HTTP status. It never receives paths, identifiers, IP addresses, filenames, or content.
 - Losing every passkey means losing the vault. There is no server-side reset in this version.
 
 ## Stack
@@ -34,6 +35,7 @@ Passkey PRF ──HKDF──> passkey wrapping key
 - Cloudflare Worker + Hono API
 - Cloudflare D1 metadata + R2 encrypted attachment storage
 - Workers Rate Limiting + Turnstile registration protection
+- Workers Analytics Engine for identifier-free product and reliability metrics
 - Hourly cleanup for expired D1 records and R2 objects
 - React + Vite + Cloudflare Vite plugin
 - Cloudflare Kumo components
@@ -61,7 +63,7 @@ worker/
 └── index.ts             # Composition root only
 ```
 
-Cryptography and wire-format types remain independent of React. Worker routes own HTTP concerns while reusable infrastructure stays outside route modules. Tests run inside the Workers runtime with isolated D1 and R2 bindings; the attachment suite exercises the authenticated upload, list, download, and cleanup lifecycle end to end.
+Cryptography and wire-format types remain independent of React. Worker routes own HTTP concerns while reusable infrastructure stays outside route modules. Analytics uses a fixed, identifier-free schema documented in `worker/middleware/analytics.ts`. Tests run inside the Workers runtime with isolated D1 and R2 bindings; the attachment suite exercises the authenticated upload, list, download, and cleanup lifecycle end to end.
 
 ## Develop
 

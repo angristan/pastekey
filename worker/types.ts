@@ -3,6 +3,7 @@ import type { Context } from "hono";
 export type Bindings = {
   DB: D1Database;
   FILES: R2Bucket;
+  EVENTS: AnalyticsEngineDataset;
   AUTH_RATE_LIMITER: RateLimit;
   WRITE_RATE_LIMITER: RateLimit;
   MAX_FILE_BYTES?: string;

@@ -40,6 +40,12 @@
       "bucket_name": "pastekey-files"
     }
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "EVENTS",
+      "dataset": "pastekey_events"
+    }
+  ],
   "ratelimits": [
     {
       "name": "AUTH_RATE_LIMITER",

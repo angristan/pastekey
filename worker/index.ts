@@ -3,6 +3,7 @@ import { secureHeaders } from "hono/secure-headers";
 
 import type { AppConfig } from "../src/lib/types";
 import { serviceLimits } from "./lib/config";
+import { recordApiAnalytics } from "./middleware/analytics";
 import { rateLimitMutations } from "./middleware/rate-limit";
 import { attachmentRoutes } from "./routes/attachments";
 import { authRoutes } from "./routes/auth";
@@ -18,6 +19,7 @@ app.use("/api/*", async (c, next) => {
   c.header("Cache-Control", "no-store");
   await next();
 });
+app.use("/api/*", recordApiAnalytics());
 app.use("/api/auth/*", rateLimitMutations("AUTH_RATE_LIMITER", "auth", ["POST"]));
 app.use("/api/pastes/*", rateLimitMutations("WRITE_RATE_LIMITER", "write", ["POST", "PUT", "DELETE"]));
 
