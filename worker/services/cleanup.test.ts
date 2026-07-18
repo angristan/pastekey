@@ -48,6 +48,31 @@ describe("expired ciphertext cleanup", () => {
     expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(fileId).first()).toBeNull();
   });
 
+  it("drains more than one cleanup batch in a bounded run", async () => {
+    const now = Date.now();
+    const statements = Array.from({ length: 101 }, (_, index) => {
+      const id = `cleanup-batch-${String(index).padStart(8, "0")}`;
+      return bindings.DB.prepare(
+        `INSERT INTO upload_reservations (
+          id, owner_id, paste_id, object_key, ciphertext_size, created_at, expires_at
+        ) VALUES (?, ?, ?, ?, 32, ?, ?)`,
+      ).bind(id, userId, pasteId, `${objectKey}-${index}`, now - 10_000, now - 1);
+    });
+    await bindings.DB.batch(statements.slice(0, 100));
+    await bindings.DB.batch(statements.slice(100));
+
+    await cleanupExpired(bindings);
+
+    const reservations = await bindings.DB.prepare(
+      "SELECT COUNT(*) AS count FROM upload_reservations WHERE owner_id = ?",
+    ).bind(userId).first<{ count: number }>();
+    const jobs = await bindings.DB.prepare(
+      "SELECT COUNT(*) AS count FROM deletion_jobs WHERE owner_id = ?",
+    ).bind(userId).first<{ count: number }>();
+    expect(reservations?.count).toBe(0);
+    expect(jobs?.count).toBe(101);
+  });
+
   it("moves abandoned upload reservations through the durable deletion queue", async () => {
     const now = Date.now();
     await bindings.DB.prepare(

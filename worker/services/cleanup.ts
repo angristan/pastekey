@@ -1,7 +1,8 @@
 import type { Bindings } from "../types";
 import { enqueuePendingDeletions, recoverStaleDeletions } from "./deletions";
 
-const EXPIRY_BATCH_SIZE = 100;
+// Keep each set-based statement below D1's bound-variable ceiling.
+const EXPIRY_BATCH_SIZE = 90;
 const MAX_CLEANUP_BATCHES = 5;
 
 type CleanupCandidates = {

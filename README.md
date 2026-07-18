@@ -151,7 +151,7 @@ bunx wrangler secret put TURNSTILE_SECRET_KEY
 bun run deploy
 ```
 
-The supported deployment command runs type checking, the complete test suite, a production build, and a Wrangler dry-run. It then applies pending remote D1 migrations before deploying the Worker.
+The supported deployment command audits dependencies, runs type checking and the complete test suite, creates a production build, and performs a Wrangler dry-run. It then applies pending remote D1 migrations, deploys the Worker, and runs bounded read-only production smoke checks.
 
 ### Configuration
 
@@ -181,7 +181,7 @@ The configured rate limits are 20 authentication mutations and 30 write mutation
 | `bun run test` | Run unit and Workers integration tests |
 | `bun run build` | Create a production build |
 | `bun run preview` | Preview the production client build |
-| `bun run verify` | Run checks, tests, build, and deployment dry-run |
+| `bun run verify` | Audit dependencies, test, typecheck, build, and dry-run deployment |
 | `bun run db:migrate:local` | Apply local D1 migrations |
 | `bun run db:migrate:remote` | Apply remote D1 migrations |
 | `bun run deploy` | Verify, migrate remote D1, and deploy |
