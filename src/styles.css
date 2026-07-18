@@ -291,20 +291,35 @@ a { color: inherit; }
 .composer-actions > span { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .composer-actions > div { display: flex; gap: 8px; }
 
-.paste-list { display: grid; gap: 14px; }
-.paste-card { padding: 0 !important; overflow: hidden; }
-.paste-card-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 21px 22px; }
-.paste-title-row { display: flex; align-items: center; gap: 10px; }
-.paste-title-row h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
-.paste-card-head p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
-.paste-actions { display: flex; align-items: center; gap: 7px; }
-.file-drop-card .paste-card-head { padding: 13px 18px; }
-.file-drop-card .paste-card-head > div:first-child { min-width: 0; display: flex; align-items: center; gap: 12px; }
-.file-drop-card .paste-title-row h2 { font-size: 16px; }
-.file-drop-card .paste-card-head p { margin: 0; white-space: nowrap; }
-.file-drop-card .attachment-list { padding: 9px 18px; gap: 7px; background: var(--paper); }
-.file-drop-card .attachment-row > span { font-weight: 650; }
-.file-drop-card .file-item-status { padding: 12px 18px; }
+.paste-list { display: grid; gap: 8px; }
+.vault-item { padding: 0 !important; overflow: hidden; box-shadow: none !important; }
+.vault-row {
+  min-height: 66px;
+  padding: 9px 12px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+.vault-kind-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--deep);
+  background: #edf0e8;
+}
+.vault-kind-icon svg { width: 19px; height: 19px; }
+.vault-summary { min-width: 0; padding: 0; display: grid; gap: 4px; border: 0; text-align: left; color: inherit; background: none; cursor: pointer; }
+.vault-summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; letter-spacing: -.015em; }
+.vault-summary span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.vault-summary:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.vault-summary:focus-visible { outline: 2px solid var(--deep); outline-offset: 4px; border-radius: 2px; }
+.vault-actions { display: flex; align-items: center; gap: 4px; }
+.vault-detail-toggle svg { transition: transform .15s ease; }
+.vault-detail-toggle[data-state="open"] svg { transform: rotate(180deg); }
+.vault-file-detail { padding: 11px 14px; background: var(--paper); }
 .share-error { padding: 10px 22px; color: #9b2c2c; background: #fff0ed; border-top: 1px solid #f1c6bd; font-size: 12px; }
 .share-list { padding: 16px 22px; display: grid; gap: 10px; border-top: 1px solid var(--line); background: #f7f5ef; }
 .share-list > div:first-child { display: flex; justify-content: space-between; gap: 16px; }
@@ -330,19 +345,18 @@ a { color: inherit; }
 .attachment-preview audio { display: block; width: min(100%, 560px); margin: auto; }
 .attachment-preview pre { max-height: 420px; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--mono); }
 .attachment-preview > small { display: block; margin-top: 8px; color: var(--muted); }
-.paste-preview {
-  width: 100%;
-  padding: 18px 22px;
-  display: block;
-  border: 0;
+.vault-text-detail {
+  max-height: 420px;
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
   border-top: 1px solid var(--line);
-  text-align: left;
   color: #d9e6df;
   background: #20332f;
-  cursor: pointer;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.65 var(--mono);
 }
-.paste-preview pre { margin: 0; overflow: auto; white-space: pre-wrap; font: 12px/1.65 var(--mono); }
-.paste-preview > span { display: inline-block; margin-top: 10px; color: var(--acid); font: 11px var(--mono); }
 
 .empty-card { padding: 58px 30px !important; display: grid; justify-items: center; text-align: center; }
 .empty-card h2 { margin: 13px 0 4px; font-size: 23px; }
@@ -373,7 +387,7 @@ a { color: inherit; }
   .composer-grid > :first-child { grid-column: 1 / -1; }
   .file-composer-grid { grid-template-columns: 1fr 160px; }
   .file-composer-grid > :first-child { grid-column: auto; }
-  .paste-card-head, .shared-heading, .shared-footer { align-items: flex-start; flex-direction: column; }
+  .shared-heading, .shared-footer { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 620px) {
@@ -392,10 +406,8 @@ a { color: inherit; }
   .composer-actions { align-items: flex-end; }
   .composer-actions > span { display: none; }
   .composer-actions > div { width: 100%; justify-content: flex-end; }
-  .paste-card-head { align-items: stretch; }
-  .file-drop-card .paste-card-head > div:first-child { align-items: flex-start; flex-direction: column; gap: 4px; }
-  .paste-actions { justify-content: flex-end; flex-wrap: wrap; }
-  .paste-actions button span { display: none; }
+  .vault-row { grid-template-columns: 38px minmax(0, 1fr); align-items: center; }
+  .vault-actions { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
   .attachment-row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .new-share-link > div { align-items: stretch; flex-direction: column; }
   .new-share-link input { width: 100%; }

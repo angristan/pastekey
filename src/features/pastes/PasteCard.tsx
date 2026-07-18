@@ -1,19 +1,25 @@
-import { Badge } from "@cloudflare/kumo/components/badge";
 import { Button } from "@cloudflare/kumo/components/button";
+import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
 import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import {
+  CaretDownIcon,
   CheckIcon,
   CopyIcon,
+  DotsThreeVerticalIcon,
+  DownloadSimpleIcon,
+  FileIcon,
+  FileTextIcon,
   KeyIcon,
   PaperclipIcon,
   ShareNetworkIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
 import { lazy, Suspense, useEffect, useState } from "react";
+
 import { api } from "../../lib/api";
-import type { UnlockedAttachment } from "../../lib/attachments";
+import { downloadAttachment, type UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata } from "../../lib/crypto";
-import { formatDate, formatExpiry, messageOf } from "../../lib/format";
+import { formatBytes, formatDate, formatExpiry, messageOf } from "../../lib/format";
 import { itemKindOf, type StoredAttachment } from "../../lib/types";
 import type { UnlockedPaste } from "./types";
 
@@ -34,7 +40,7 @@ export function PasteCard({
   onShare: () => Promise<{ share: ShareSummary; url: string }>;
   onDelete: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [shares, setShares] = useState<ShareSummary[] | null>(null);
   const [attachments, setAttachments] = useState<UnlockedAttachment[] | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
@@ -42,22 +48,28 @@ export function PasteCard({
   const [copiedPaste, setCopiedPaste] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [loadingShares, setLoadingShares] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
   const fileItem = itemKindOf(paste.payload) === "files";
-  const autoFileTitle = fileItem && (
+  const primaryAttachment = attachments?.length === 1 ? attachments[0] : null;
+  const generatedFileTitle = fileItem && (
+    paste.payload.title === "File drop" ||
     /^\d+ encrypted files$/.test(paste.payload.title) ||
-    (attachments?.length === 1 && attachments[0]?.metadata.name === paste.payload.title)
+    primaryAttachment?.metadata.name === paste.payload.title
   );
-  const displayTitle = autoFileTitle ? "File drop" : paste.payload.title;
-  const fileCount = attachments?.length;
-  const badge = fileItem
-    ? (fileCount === undefined ? "File drop" : `${fileCount} ${fileCount === 1 ? "file" : "files"}`)
-    : paste.payload.language;
-  const preview = paste.payload.content.split("\n").slice(0, 4).join("\n");
+  const displayTitle = generatedFileTitle && primaryAttachment ? primaryAttachment.metadata.name : paste.payload.title;
+  const detailPanelId = `detail-panel-${paste.stored.id}`;
   const sharePanelId = `share-panel-${paste.stored.id}`;
   const filePanelId = `file-panel-${paste.stored.id}`;
+  const itemSummary = fileItem
+    ? attachments === null
+      ? "Decrypting files…"
+      : primaryAttachment
+        ? `${formatBytes(primaryAttachment.metadata.size)} · File`
+        : `${attachments.length} ${attachments.length === 1 ? "file" : "files"}`
+    : paste.payload.language;
 
   useEffect(() => {
     if (!fileItem) return;
@@ -168,59 +180,99 @@ export function PasteCard({
     }
   }
 
+  async function downloadPrimaryFile() {
+    if (!primaryAttachment) return;
+    setDownloading(true);
+    setPanelError(null);
+    try {
+      await downloadAttachment(
+        `/api/pastes/${paste.stored.id}/files/${primaryAttachment.stored.id}/content`,
+        primaryAttachment,
+      );
+    } catch (cause) {
+      setPanelError(messageOf(cause));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function openFileDetails() {
+    setDetailsOpen(true);
+  }
+
   return (
-    <LayerCard className={`paste-card${fileItem ? " file-drop-card" : ""}`}>
-      <div className="paste-card-head">
-        <div>
-          <div className="paste-title-row">
-            <h2>{displayTitle}</h2>
-            <Badge>{badge}</Badge>
-          </div>
-          <p>Updated {formatDate(paste.stored.updatedAt)} · {formatExpiry(paste.stored.expiresAt)}</p>
-        </div>
-        <div className="paste-actions">
-          <Button size="sm" icon={ShareNetworkIcon} loading={sharing} onClick={createShare}>Share</Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={KeyIcon}
-            loading={loadingShares}
-            data-state={shares !== null ? "open" : "closed"}
-            aria-expanded={shares !== null}
-            aria-controls={sharePanelId}
-            onClick={toggleShares}
-          >
-            Manage links
-          </Button>
-          {!fileItem && (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={PaperclipIcon}
-              loading={loadingFiles}
-              aria-expanded={attachments !== null}
-              aria-controls={filePanelId}
-              onClick={toggleFiles}
-            >
-              Attachments
-            </Button>
-          )}
-          {!fileItem && (
-            <Button size="sm" variant="ghost" icon={copiedPaste ? CheckIcon : CopyIcon} onClick={copyPaste}>
+    <LayerCard className="vault-item">
+      <div className="vault-row">
+        <span className="vault-kind-icon" aria-hidden="true">
+          {fileItem ? <FileIcon weight="duotone" /> : <FileTextIcon weight="duotone" />}
+        </span>
+        <button
+          type="button"
+          className="vault-summary"
+          aria-expanded={detailsOpen}
+          aria-controls={detailPanelId}
+          onClick={() => setDetailsOpen((open) => !open)}
+        >
+          <strong>{displayTitle}</strong>
+          <span>{itemSummary} · Updated {formatDate(paste.stored.updatedAt)} · {formatExpiry(paste.stored.expiresAt)}</span>
+        </button>
+        <div className="vault-actions">
+          {fileItem ? (
+            primaryAttachment ? (
+              <Button size="sm" icon={DownloadSimpleIcon} loading={downloading} onClick={downloadPrimaryFile}>Download</Button>
+            ) : (
+              <Button size="sm" loading={attachments === null} onClick={openFileDetails}>View files</Button>
+            )
+          ) : (
+            <Button size="sm" icon={copiedPaste ? CheckIcon : CopyIcon} onClick={copyPaste}>
               {copiedPaste ? "Copied" : "Copy"}
             </Button>
           )}
+          <Button size="sm" variant="ghost" icon={ShareNetworkIcon} loading={sharing} onClick={createShare}>Share</Button>
           <Button
+            className="vault-detail-toggle"
             size="sm"
             shape="square"
             variant="ghost"
-            icon={TrashIcon}
-            aria-label={`Delete ${fileItem ? "file drop" : "paste"}`}
-            onClick={onDelete}
+            icon={CaretDownIcon}
+            data-state={detailsOpen ? "open" : "closed"}
+            aria-label={detailsOpen ? "Hide details" : "Show details"}
+            aria-expanded={detailsOpen}
+            aria-controls={detailPanelId}
+            onClick={() => setDetailsOpen((open) => !open)}
           />
+          <DropdownMenu>
+            <DropdownMenu.Trigger
+              render={
+                <Button
+                  size="sm"
+                  shape="square"
+                  variant="ghost"
+                  icon={DotsThreeVerticalIcon}
+                  aria-label={`More actions for ${displayTitle}`}
+                />
+              }
+            />
+            <DropdownMenu.Content>
+              <DropdownMenu.Item icon={KeyIcon} disabled={loadingShares} onClick={toggleShares}>
+                {loadingShares ? "Loading links…" : shares === null ? "Manage links" : "Hide links"}
+              </DropdownMenu.Item>
+              {!fileItem && (
+                <DropdownMenu.Item icon={PaperclipIcon} disabled={loadingFiles} onClick={toggleFiles}>
+                  {loadingFiles ? "Loading attachments…" : attachments === null ? "Attachments" : "Hide attachments"}
+                </DropdownMenu.Item>
+              )}
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item icon={TrashIcon} variant="danger" onClick={onDelete}>
+                Delete {fileItem ? "file drop" : "paste"}
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu>
         </div>
       </div>
+
       {panelError && <div className="share-error">{panelError}</div>}
+
       {shares !== null && (
         <div className="share-list" id={sharePanelId}>
           <div>
@@ -259,28 +311,28 @@ export function PasteCard({
           ))}
         </div>
       )}
-      {fileItem && attachments === null && !panelError && (
-        <div className="file-item-status">Decrypting files…</div>
+
+      {!fileItem && detailsOpen && (
+        <pre className="vault-text-detail" id={detailPanelId}><code>{paste.payload.content}</code></pre>
       )}
-      {attachments && (
+
+      {fileItem && detailsOpen && attachments === null && !panelError && (
+        <div className="file-item-status" id={detailPanelId}>Decrypting files…</div>
+      )}
+
+      {attachments && (!fileItem || detailsOpen) && (
         <Suspense fallback={<div className="file-item-status">Opening files…</div>}>
           <AttachmentList
             attachments={attachments}
-            className="attachment-list"
+            className="attachment-list vault-file-detail"
             downloadEndpoint={(attachment) => `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`}
             emptyMessage={fileItem ? "No files remain in this drop." : "No files attached."}
-            id={filePanelId}
+            id={fileItem ? detailPanelId : filePanelId}
             onDelete={fileItem && attachments.length <= 1 ? undefined : removeFile}
             onError={setPanelError}
-            title={fileItem ? null : "Encrypted attachments"}
+            title={fileItem ? null : "Attachments"}
           />
         </Suspense>
-      )}
-      {!fileItem && (
-        <button className="paste-preview" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
-          <pre>{expanded ? paste.payload.content : preview}</pre>
-          {!expanded && paste.payload.content.split("\n").length > 4 && <span>Show all</span>}
-        </button>
       )}
     </LayerCard>
   );
