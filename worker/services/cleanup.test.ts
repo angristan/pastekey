@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { createExecutionContext, createMessageBatch, getQueueResult } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { cleanupExpired } from "./cleanup";
+import { cleanupExpired, findCleanupCandidates, stageCleanupCandidates } from "./cleanup";
 import { consumeDeletionQueue } from "./deletions";
 import type { Bindings, DeletionMessage } from "../types";
 
@@ -18,6 +18,34 @@ describe("expired ciphertext cleanup", () => {
     await bindings.DB.prepare("DELETE FROM upload_reservations WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("rechecks expiry atomically before staging attachment deletion", async () => {
+    const now = Date.now();
+    await bindings.DB.batch([
+      bindings.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(userId, now),
+      bindings.DB.prepare(
+        `INSERT INTO pastes (
+          id, owner_id, ciphertext, content_iv, wrapped_key, wrapped_key_iv, created_at, updated_at, expires_at
+        ) VALUES (?, ?, 'AA', 'AA', 'AA', 'AA', ?, ?, ?)`,
+      ).bind(pasteId, userId, now, now, now - 1),
+      bindings.DB.prepare(
+        `INSERT INTO attachments (
+          id, paste_id, object_key, ciphertext_size, content_iv, wrapped_key, wrapped_key_iv,
+          metadata_ciphertext, metadata_iv, created_at
+        ) VALUES (?, ?, ?, 32, 'AA', 'AA', 'AA', 'AA', 'AA', ?)`,
+      ).bind(fileId, pasteId, objectKey, now),
+    ]);
+
+    const candidates = await findCleanupCandidates(bindings.DB, now);
+    expect(candidates.attachmentIds).toContain(fileId);
+    await bindings.DB.prepare("UPDATE pastes SET expires_at = ? WHERE id = ?")
+      .bind(now + 60_000, pasteId)
+      .run();
+    await stageCleanupCandidates(bindings.DB, candidates, now);
+
+    expect(await bindings.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first()).not.toBeNull();
+    expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(fileId).first()).toBeNull();
   });
 
   it("moves abandoned upload reservations through the durable deletion queue", async () => {
