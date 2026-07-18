@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { CenteredStatus } from "./components/CenteredStatus";
 import { api } from "./lib/api";
+import { appConfig } from "./lib/config";
 import { messageOf } from "./lib/format";
 import type { AppConfig, MeResponse } from "./lib/types";
 
@@ -30,12 +31,21 @@ function VaultApp() {
     setMe(await api<MeResponse>("/api/auth/me"));
   }, []);
 
-  useEffect(() => {
-    Promise.all([
-      refreshMe(),
-      api<AppConfig>("/api/config").then(setConfig),
-    ]).catch((cause) => setError(messageOf(cause)));
+  const loadStartup = useCallback(async () => {
+    setError(null);
+    try {
+      await Promise.all([
+        refreshMe(),
+        appConfig().then(setConfig),
+      ]);
+    } catch (cause) {
+      setError(messageOf(cause));
+    }
   }, [refreshMe]);
+
+  useEffect(() => {
+    void loadStartup();
+  }, [loadStartup]);
 
   async function authenticate(mode: "register" | "unlock", turnstileToken?: string) {
     setBusy(mode);
@@ -63,7 +73,20 @@ function VaultApp() {
     setMe({ authenticated: false });
   }
 
-  if (!me || !config) return <CenteredStatus label="Opening Pastekey…" />;
+  if (!me || !config) {
+    if (error) {
+      return (
+        <main className="center-page">
+          <div className="startup-error" role="alert">
+            <h1>Pastekey could not open</h1>
+            <p>{error}</p>
+            <button type="button" onClick={() => void loadStartup()}>Retry</button>
+          </div>
+        </main>
+      );
+    }
+    return <CenteredStatus label="Opening Pastekey…" />;
+  }
 
   if (!me.authenticated) {
     return (
