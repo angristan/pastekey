@@ -228,16 +228,58 @@ export function PasteCard({
         <div className="vault-actions">
           {fileItem ? (
             primaryAttachment ? (
-              <Button size="sm" icon={DownloadSimpleIcon} loading={downloading} onClick={downloadPrimaryFile}>Download</Button>
+              <>
+                <Button className="desktop-vault-action" size="sm" icon={DownloadSimpleIcon} loading={downloading} onClick={downloadPrimaryFile}>Download</Button>
+                <Button
+                  className="mobile-vault-action"
+                  size="sm"
+                  shape="square"
+                  icon={DownloadSimpleIcon}
+                  loading={downloading}
+                  aria-label={`Download ${displayTitle}`}
+                  onClick={downloadPrimaryFile}
+                />
+              </>
             ) : (
-              <Button size="sm" loading={attachments === null} onClick={openFileDetails}>View files</Button>
+              <>
+                <Button className="desktop-vault-action" size="sm" loading={attachments === null} onClick={openFileDetails}>View files</Button>
+                <Button
+                  className="mobile-vault-action"
+                  size="sm"
+                  shape="square"
+                  icon={FileIcon}
+                  loading={attachments === null}
+                  aria-label={`View files in ${displayTitle}`}
+                  onClick={openFileDetails}
+                />
+              </>
             )
           ) : (
-            <Button size="sm" icon={copiedPaste ? CheckIcon : CopyIcon} onClick={copyPaste}>
-              {copiedPaste ? "Copied" : "Copy"}
-            </Button>
+            <>
+              <Button className="desktop-vault-action" size="sm" icon={copiedPaste ? CheckIcon : CopyIcon} onClick={copyPaste}>
+                {copiedPaste ? "Copied" : "Copy"}
+              </Button>
+              <Button
+                className="mobile-vault-action"
+                size="sm"
+                shape="square"
+                icon={copiedPaste ? CheckIcon : CopyIcon}
+                aria-label={copiedPaste ? `${displayTitle} copied` : `Copy ${displayTitle}`}
+                onClick={copyPaste}
+              />
+            </>
           )}
-          <Button size="sm" variant="ghost" icon={ShareNetworkIcon} loading={sharing} onClick={createShare}>Share</Button>
+          <Button className="desktop-vault-action" size="sm" variant="ghost" icon={ShareNetworkIcon} loading={sharing} onClick={createShare}>Share</Button>
+          <Button
+            className="mobile-vault-action"
+            size="sm"
+            shape="square"
+            variant="ghost"
+            icon={ShareNetworkIcon}
+            loading={sharing}
+            aria-label={`Share ${displayTitle}`}
+            onClick={createShare}
+          />
           <Button
             className="vault-detail-toggle"
             size="sm"
