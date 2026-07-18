@@ -5,7 +5,8 @@ export const DELETION_QUEUE_NAME = "pastekey-deletions";
 export const DELETION_DLQ_NAME = "pastekey-deletions-dlq";
 
 const ENQUEUE_BATCH_SIZE = 100;
-const MAX_ENQUEUE_BATCHES = 5;
+// A cleanup run can stage up to 900 attachment and reservation jobs.
+const MAX_ENQUEUE_BATCHES = 10;
 const HOUR_MS = 60 * 60 * 1_000;
 const MAX_BACKOFF_MS = 24 * HOUR_MS;
 const STALE_DISPATCH_MS = 25 * HOUR_MS;
