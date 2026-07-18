@@ -4,6 +4,7 @@ import { CenteredStatus } from "./components/CenteredStatus";
 import { api } from "./lib/api";
 import { appConfig } from "./lib/config";
 import { messageOf } from "./lib/format";
+import { shareIdFromPath } from "./lib/routes";
 import type { MeResponse } from "../shared/protocol/auth";
 import type { AppConfig } from "../shared/protocol/config";
 
@@ -13,7 +14,7 @@ const Dashboard = lazy(() => import("./features/pastes/Dashboard").then((module)
 const SharedPastePage = lazy(() => import("./features/sharing/SharedPastePage").then((module) => ({ default: module.SharedPastePage })));
 
 export default function App() {
-  const shareId = shareIdFromPath();
+  const shareId = shareIdFromPath(window.location.pathname);
   return (
     <Suspense fallback={<CenteredStatus label="Opening Pastekey…" />}>
       {shareId ? <SharedPastePage shareId={shareId} /> : <VaultApp />}
@@ -122,9 +123,4 @@ function VaultApp() {
       onRefreshMe={refreshMe}
     />
   );
-}
-
-function shareIdFromPath() {
-  const match = window.location.pathname.match(/^\/s\/([A-Za-z0-9_-]{20,64})$/);
-  return match?.[1] ?? null;
 }

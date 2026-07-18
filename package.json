@@ -15,7 +15,8 @@
     "typecheck:client": "tsc -p tsconfig.client.json",
     "typecheck:worker": "tsc -p tsconfig.worker.json",
     "typecheck:tools": "tsc -p tsconfig.tools.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke:production": "bun scripts/smoke.ts"
   },
   "dependencies": {
     "@cloudflare/kumo": "2.7.0",

@@ -14,13 +14,14 @@ import { api } from "../../lib/api";
 import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptSharedPaste } from "../../lib/crypto";
 import { formatDate, messageOf } from "../../lib/format";
+import { shareSecretFromHash } from "../../lib/routes";
 import { unlockAttachments } from "../pastes/useUnlockedAttachments";
 import { itemKindOf, type PastePayload, type StoredShare } from "../../../shared/protocol/pastes";
 
 const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
 
 export function SharedPastePage({ shareId }: { shareId: string }) {
-  const secret = window.location.hash.slice(1);
+  const secret = shareSecretFromHash(window.location.hash);
   const [payload, setPayload] = useState<PastePayload | null>(null);
   const [metadata, setMetadata] = useState<StoredShare | null>(null);
   const [attachments, setAttachments] = useState<UnlockedAttachment[]>([]);

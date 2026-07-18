@@ -185,5 +185,6 @@ The configured rate limits are 20 authentication mutations and 30 write mutation
 | `bun run db:migrate:local` | Apply local D1 migrations |
 | `bun run db:migrate:remote` | Apply remote D1 migrations |
 | `bun run deploy` | Verify, migrate remote D1, and deploy |
+| `bun run smoke:production` | Run bounded read-only checks against production |
 
 CI installs with the frozen Bun lockfile and runs `bun run verify` for pushes to `main` and pull requests.
