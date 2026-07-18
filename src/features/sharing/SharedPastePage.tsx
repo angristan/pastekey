@@ -1,4 +1,5 @@
-import { Button, LayerCard } from "@cloudflare/kumo";
+import { Button } from "@cloudflare/kumo/components/button";
+import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import {
   ArrowSquareOutIcon,
   CheckIcon,
@@ -6,15 +7,16 @@ import {
   KeyIcon,
   LockKeyIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
-
-import { AttachmentList } from "../../components/AttachmentList";
-import { Brand, CenteredStatus, GitHubLink } from "../../components/Brand";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Brand, GitHubLink } from "../../components/Brand";
+import { CenteredStatus } from "../../components/CenteredStatus";
 import { api } from "../../lib/api";
 import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata, decryptSharedPaste } from "../../lib/crypto";
 import { formatDate, messageOf } from "../../lib/format";
 import { itemKindOf, type PastePayload, type StoredShare } from "../../lib/types";
+
+const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
 
 export function SharedPastePage({ shareId }: { shareId: string }) {
   const secret = window.location.hash.slice(1);
@@ -97,15 +99,17 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
           {panelError && <div className="share-error">{panelError}</div>}
           {!fileItem && <pre className="shared-content"><code>{payload.content}</code></pre>}
           {(fileItem || attachments.length > 0) && (
-            <AttachmentList
-              attachments={attachments}
-              buttonSize="sm"
-              className="shared-attachments"
-              downloadEndpoint={(attachment) => `/api/shares/${shareId}/files/${attachment.stored.id}/content`}
-              emptyMessage="No files remain in this drop."
-              onError={setPanelError}
-              title={fileItem ? "Encrypted files" : "Attachments"}
-            />
+            <Suspense fallback={<CenteredStatus label="Opening files…" compact />}>
+              <AttachmentList
+                attachments={attachments}
+                buttonSize="sm"
+                className="shared-attachments"
+                downloadEndpoint={(attachment) => `/api/shares/${shareId}/files/${attachment.stored.id}/content`}
+                emptyMessage="No files remain in this drop."
+                onError={setPanelError}
+                title={fileItem ? "Encrypted files" : "Attachments"}
+              />
+            </Suspense>
           )}
           <footer className="shared-footer">
             <span><KeyIcon /> End-to-end encrypted. Pastekey can’t read this {fileItem ? "file drop" : "paste"}.</span>

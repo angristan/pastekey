@@ -1,4 +1,4 @@
-import { LinkButton } from "@cloudflare/kumo";
+import { LinkButton } from "@cloudflare/kumo/components/button";
 import { GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 
 export function GitHubLink() {
@@ -22,8 +22,4 @@ export function Brand() {
       <span>pastekey</span>
     </div>
   );
-}
-
-export function CenteredStatus({ label, compact = false }: { label: string; compact?: boolean }) {
-  return <div className={compact ? "status compact" : "status"}><span className="spinner" />{label}</div>;
 }

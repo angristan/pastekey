@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
-import { CenteredStatus } from "./components/Brand";
-import { Landing } from "./features/auth/Landing";
-import { LockedVault } from "./features/auth/LockedVault";
-import { Dashboard } from "./features/pastes/Dashboard";
-import { SharedPastePage } from "./features/sharing/SharedPastePage";
+import { CenteredStatus } from "./components/CenteredStatus";
 import { api } from "./lib/api";
 import { messageOf } from "./lib/format";
-import { registerPasskey, unlockWithPasskey } from "./lib/passkeys";
 import type { AppConfig, MeResponse } from "./lib/types";
+
+const Landing = lazy(() => import("./features/auth/Landing").then((module) => ({ default: module.Landing })));
+const LockedVault = lazy(() => import("./features/auth/LockedVault").then((module) => ({ default: module.LockedVault })));
+const Dashboard = lazy(() => import("./features/pastes/Dashboard").then((module) => ({ default: module.Dashboard })));
+const SharedPastePage = lazy(() => import("./features/sharing/SharedPastePage").then((module) => ({ default: module.SharedPastePage })));
 
 export default function App() {
   const shareId = shareIdFromPath();
-  if (shareId) return <SharedPastePage shareId={shareId} />;
-  return <VaultApp />;
+  return (
+    <Suspense fallback={<CenteredStatus label="Opening Pastekey…" />}>
+      {shareId ? <SharedPastePage shareId={shareId} /> : <VaultApp />}
+    </Suspense>
+  );
 }
 
 function VaultApp() {
@@ -38,6 +41,7 @@ function VaultApp() {
     setBusy(mode);
     setError(null);
     try {
+      const { registerPasskey, unlockWithPasskey } = await import("./lib/passkeys");
       const result = mode === "register" ? await registerPasskey(undefined, turnstileToken) : await unlockWithPasskey();
       setAccountKey(result.accountKey);
       await refreshMe();

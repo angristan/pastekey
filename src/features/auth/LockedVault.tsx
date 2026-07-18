@@ -1,4 +1,6 @@
-import { Banner, Button, LayerCard } from "@cloudflare/kumo";
+import { Banner } from "@cloudflare/kumo/components/banner";
+import { Button } from "@cloudflare/kumo/components/button";
+import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import { FingerprintIcon, LockKeyIcon } from "@phosphor-icons/react";
 
 export function LockedVault({

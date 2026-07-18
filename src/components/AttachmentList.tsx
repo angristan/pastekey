@@ -1,4 +1,4 @@
-import { Button } from "@cloudflare/kumo";
+import { Button } from "@cloudflare/kumo/components/button";
 import { DownloadSimpleIcon, EyeIcon, FileIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 

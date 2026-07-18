@@ -1,16 +1,19 @@
-import { Banner, Button, LayerCard } from "@cloudflare/kumo";
+import { Banner } from "@cloudflare/kumo/components/banner";
+import { Button } from "@cloudflare/kumo/components/button";
+import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import { CheckIcon, FileTextIcon, KeyIcon, LockKeyIcon, PlusIcon, SignOutIcon, UploadSimpleIcon } from "@phosphor-icons/react";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
-import { Brand, CenteredStatus, GitHubLink } from "../../components/Brand";
+import { Brand, GitHubLink } from "../../components/Brand";
+import { CenteredStatus } from "../../components/CenteredStatus";
 import { api, jsonBody } from "../../lib/api";
 import { createShareEnvelope, decryptOwnedPaste } from "../../lib/crypto";
 import { messageOf } from "../../lib/format";
-import { registerPasskey } from "../../lib/passkeys";
 import { itemKindOf, type AppConfig, type ItemKind, type MeResponse, type StoredPaste } from "../../lib/types";
 import { PasteCard } from "./PasteCard";
-import { PasteComposer } from "./PasteComposer";
 import type { UnlockedPaste } from "./types";
+
+const PasteComposer = lazy(() => import("./PasteComposer").then((module) => ({ default: module.PasteComposer })));
 
 export function Dashboard({
   accountKey,
@@ -82,6 +85,7 @@ export function Dashboard({
     setAddingPasskey(true);
     setError(null);
     try {
+      const { registerPasskey } = await import("../../lib/passkeys");
       await registerPasskey(accountKey);
       await onRefreshMe();
       setNotice("Backup passkey added.");
@@ -100,7 +104,7 @@ export function Dashboard({
           <span className="encrypted-state"><CheckIcon weight="bold" /> Vault unlocked</span>
           <Button size="sm" icon={KeyIcon} loading={addingPasskey} onClick={addPasskey}>Add passkey</Button>
           <GitHubLink />
-          <Button size="sm" variant="ghost" icon={SignOutIcon} onClick={onLogout}>Sign out</Button>
+          <Button size="sm" variant="ghost" icon={SignOutIcon} disabled={creator !== null} onClick={onLogout}>Sign out</Button>
         </div>
       </header>
 
@@ -156,18 +160,20 @@ export function Dashboard({
       )}
 
       {(creator === "paste" || creator === "files") && (
-        <PasteComposer
-          key={creator}
-          accountKey={accountKey}
-          kind={creator}
-          limits={config.limits}
-          onCreated={async () => {
-            setCreator(null);
-            setNotice(creator === "files" ? "File drop encrypted and uploaded." : "Paste encrypted and saved.");
-            await loadPastes();
-          }}
-          onCancel={() => setCreator("choose")}
-        />
+        <Suspense fallback={<CenteredStatus label="Opening encrypted composer…" compact />}>
+          <PasteComposer
+            key={creator}
+            accountKey={accountKey}
+            kind={creator}
+            limits={config.limits}
+            onCreated={async () => {
+              setCreator(null);
+              setNotice(creator === "files" ? "File drop encrypted and uploaded." : "Paste encrypted and saved.");
+              await loadPastes();
+            }}
+            onCancel={() => setCreator("choose")}
+          />
+        </Suspense>
       )}
 
       <section className="paste-list" aria-live="polite">

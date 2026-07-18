@@ -1,4 +1,6 @@
-import { Badge, Button, LayerCard } from "@cloudflare/kumo";
+import { Badge } from "@cloudflare/kumo/components/badge";
+import { Button } from "@cloudflare/kumo/components/button";
+import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import {
   CheckIcon,
   CopyIcon,
@@ -7,15 +9,15 @@ import {
   ShareNetworkIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
-
-import { AttachmentList } from "../../components/AttachmentList";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata } from "../../lib/crypto";
 import { formatDate, formatExpiry, messageOf } from "../../lib/format";
 import { itemKindOf, type StoredAttachment } from "../../lib/types";
 import type { UnlockedPaste } from "./types";
+
+const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
 
 type ShareSummary = {
   id: string;
@@ -252,16 +254,18 @@ export function PasteCard({
         <div className="file-item-status">Decrypting files…</div>
       )}
       {attachments && (
-        <AttachmentList
-          attachments={attachments}
-          className="attachment-list"
-          downloadEndpoint={(attachment) => `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`}
-          emptyMessage={fileItem ? "No files remain in this drop." : "No files attached."}
-          id={filePanelId}
-          onDelete={removeFile}
-          onError={setPanelError}
-          title={fileItem ? "Encrypted files" : "Encrypted attachments"}
-        />
+        <Suspense fallback={<div className="file-item-status">Opening files…</div>}>
+          <AttachmentList
+            attachments={attachments}
+            className="attachment-list"
+            downloadEndpoint={(attachment) => `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`}
+            emptyMessage={fileItem ? "No files remain in this drop." : "No files attached."}
+            id={filePanelId}
+            onDelete={removeFile}
+            onError={setPanelError}
+            title={fileItem ? "Encrypted files" : "Encrypted attachments"}
+          />
+        </Suspense>
       )}
       {!fileItem && (
         <button className="paste-preview" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>

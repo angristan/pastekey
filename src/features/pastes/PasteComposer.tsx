@@ -1,11 +1,36 @@
-import { Badge, Banner, Button, Input, LayerCard, Select, Textarea } from "@cloudflare/kumo";
-import { FileIcon, LockKeyIcon, PaperclipIcon, XIcon } from "@phosphor-icons/react";
-import { useState, type FormEvent } from "react";
+import { Badge } from "@cloudflare/kumo/components/badge";
+import { Banner } from "@cloudflare/kumo/components/banner";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Input, Textarea } from "@cloudflare/kumo/components/input";
+import { LayerCard } from "@cloudflare/kumo/components/layer-card";
+import { Select } from "@cloudflare/kumo/components/select";
+import { ArrowClockwiseIcon, FileIcon, LockKeyIcon, PaperclipIcon, XIcon } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 
-import { api, jsonBody } from "../../lib/api";
+import { api, ApiError, jsonBody } from "../../lib/api";
 import { encryptAttachment, encryptNewPaste } from "../../lib/crypto";
 import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
 import type { AppConfig, ItemKind } from "../../lib/types";
+import { uploadWithRetry } from "../../lib/uploads";
+
+type UploadPhase = "pending" | "encrypting" | "uploading" | "retrying" | "complete" | "error";
+
+type SelectedFile = {
+  id: string;
+  file: File;
+  phase: UploadPhase;
+  progress: number;
+  attempt?: number;
+  maxAttempts?: number;
+  error?: string;
+};
+
+type UploadSession = {
+  pasteId: string;
+  pasteKey: CryptoKey;
+};
+
+let nextSelectionId = 0;
 
 export function PasteComposer({
   accountKey,
@@ -24,23 +49,150 @@ export function PasteComposer({
   const [content, setContent] = useState("");
   const [language, setLanguage] = useState("text");
   const [expiry, setExpiry] = useState<Expiry>("week");
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<SelectedFile[]>([]);
   const [showAttachments, setShowAttachments] = useState(kind === "files");
   const [saving, setSaving] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
+  const [uploadSession, setUploadSession] = useState<UploadSession | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dragDepth = useRef(0);
+
+  useEffect(() => {
+    if (!uploadSession) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [uploadSession]);
+
+  function addFiles(selected: File[]) {
+    if (saving || uploadSession || selected.length === 0) return;
+    if (files.length + selected.length > limits.maxFilesPerPaste) {
+      setError(`Choose at most ${limits.maxFilesPerPaste} files.`);
+      return;
+    }
+    const invalid = selected.find((file) => file.size === 0 || file.size > limits.maxFileBytes);
+    if (invalid) {
+      setError(`${invalid.name} must be between 1 byte and ${formatBytes(limits.maxFileBytes)}.`);
+      return;
+    }
+    setError(null);
+    setFiles((current) => [
+      ...current,
+      ...selected.map((file) => ({
+        id: `selected-${Date.now()}-${nextSelectionId++}`,
+        file,
+        phase: "pending" as const,
+        progress: 0,
+      })),
+    ]);
+  }
+
+  function enterDropzone(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (saving || uploadSession) return;
+    dragDepth.current += 1;
+    setDragging(true);
+  }
+
+  function leaveDropzone(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  }
+
+  function dropFiles(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    addFiles(Array.from(event.dataTransfer.files));
+  }
+
+  function updateFile(id: string, patch: Partial<SelectedFile>) {
+    setFiles((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }
+
+  async function uploadFile(selected: SelectedFile, session: UploadSession) {
+    updateFile(selected.id, { phase: "encrypting", progress: 0, error: undefined, attempt: undefined, maxAttempts: undefined });
+    try {
+      const attachment = await encryptAttachment(session.pasteKey, session.pasteId, selected.file);
+      updateFile(selected.id, { phase: "uploading" });
+      await uploadWithRetry(
+        `/api/pastes/${session.pasteId}/files/${attachment.id}`,
+        attachment.body,
+        attachment.headers,
+        {
+          onProgress: (loaded, reportedTotal) => {
+            const total = reportedTotal || attachment.body.byteLength;
+            updateFile(selected.id, {
+              phase: "uploading",
+              progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
+            });
+          },
+          onRetry: (attempt, maxAttempts) => updateFile(selected.id, {
+            phase: "retrying",
+            progress: 0,
+            attempt,
+            maxAttempts,
+          }),
+        },
+      );
+      updateFile(selected.id, { phase: "complete", progress: 100, attempt: undefined, maxAttempts: undefined });
+      return true;
+    } catch (cause) {
+      updateFile(selected.id, { phase: "error", progress: 0, error: messageOf(cause) });
+      return false;
+    }
+  }
+
+  async function finishCreation() {
+    setUploadSession(null);
+    setProgress("Refreshing vault…");
+    await onCreated();
+  }
+
+  async function retryFiles(targets: SelectedFile[]) {
+    if (!uploadSession || targets.length === 0 || saving) return;
+    setSaving(true);
+    setError(null);
+    const failedIds = new Set<string>();
+    try {
+      for (const selected of targets) {
+        if (!(await uploadFile(selected, uploadSession))) failedIds.add(selected.id);
+      }
+      const targetIds = new Set(targets.map((selected) => selected.id));
+      const remaining = files.filter((selected) =>
+        selected.phase !== "complete" && (!targetIds.has(selected.id) || failedIds.has(selected.id)),
+      ).length;
+      if (remaining === 0) {
+        await finishCreation();
+      } else {
+        setError(`${remaining} ${remaining === 1 ? "file" : "files"} could not be uploaded. Review the error, then retry or discard.`);
+      }
+    } finally {
+      setProgress(null);
+      setSaving(false);
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (uploadSession) {
+      await retryFiles(files.filter((selected) => selected.phase === "error"));
+      return;
+    }
     if (kind === "paste" && !content.trim()) return setError("Add some paste content.");
     if (kind === "files" && files.length === 0) return setError("Choose at least one file.");
+
     setSaving(true);
     setError(null);
-    let createdPasteId: string | null = null;
     try {
       setProgress(kind === "files" ? "Encrypting file drop…" : "Encrypting paste…");
       const fallbackTitle = kind === "files"
-        ? (files.length === 1 ? files[0]!.name : `${files.length} encrypted files`)
+        ? (files.length === 1 ? files[0]!.file.name : `${files.length} encrypted files`)
         : "Untitled paste";
       const encrypted = await encryptNewPaste(
         accountKey,
@@ -53,27 +205,53 @@ export function PasteComposer({
         expiryTimestamp(expiry),
       );
       await api("/api/pastes", { method: "POST", ...jsonBody(encrypted.write) });
-      createdPasteId = encrypted.write.id;
 
-      for (const [index, file] of files.entries()) {
-        setProgress(`Encrypting file ${index + 1} of ${files.length}…`);
-        const attachment = await encryptAttachment(encrypted.pasteKey, encrypted.write.id, file);
-        setProgress(`Uploading file ${index + 1} of ${files.length}…`);
-        await api(`/api/pastes/${encrypted.write.id}/files/${attachment.id}`, {
-          method: "PUT",
-          body: attachment.body,
-          headers: attachment.headers,
-        });
+      if (files.length === 0) {
+        await finishCreation();
+        return;
       }
 
+      const session = { pasteId: encrypted.write.id, pasteKey: encrypted.pasteKey };
+      setUploadSession(session);
       setProgress(null);
-      await onCreated();
+      let failures = 0;
+      for (const selected of files) {
+        if (!(await uploadFile(selected, session))) failures += 1;
+      }
+      if (failures === 0) {
+        await finishCreation();
+      } else {
+        setError(`${failures} ${failures === 1 ? "file" : "files"} could not be uploaded. Review the error, then retry or discard.`);
+      }
     } catch (cause) {
-      if (createdPasteId) {
-        await api<void>(`/api/pastes/${createdPasteId}`, { method: "DELETE" }).catch(() => undefined);
-      }
-      setProgress(null);
       setError(messageOf(cause));
+    } finally {
+      setProgress(null);
+      setSaving(false);
+    }
+  }
+
+  async function cancel() {
+    if (saving) return;
+    if (!uploadSession) {
+      onCancel();
+      return;
+    }
+    if (!window.confirm("Discard this unfinished upload and delete files that already uploaded?")) return;
+
+    setSaving(true);
+    setError(null);
+    try {
+      await api<void>(`/api/pastes/${uploadSession.pasteId}`, { method: "DELETE" });
+      setUploadSession(null);
+      onCancel();
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 404) {
+        setUploadSession(null);
+        onCancel();
+      } else {
+        setError(messageOf(cause));
+      }
     } finally {
       setSaving(false);
     }
@@ -97,11 +275,17 @@ export function PasteComposer({
             label="Title"
             placeholder={kind === "files" ? "Design assets (optional)" : "Deploy notes"}
             value={title}
+            disabled={saving || Boolean(uploadSession)}
             onChange={(event) => setTitle(event.target.value)}
             maxLength={120}
           />
           {kind === "paste" && (
-            <Select<string> label="Format" value={language} onValueChange={(value) => value && setLanguage(value)}>
+            <Select<string>
+              label="Format"
+              value={language}
+              disabled={saving || Boolean(uploadSession)}
+              onValueChange={(value) => value && setLanguage(value)}
+            >
               <Select.Option value="text">Plain text</Select.Option>
               <Select.Option value="javascript">JavaScript</Select.Option>
               <Select.Option value="typescript">TypeScript</Select.Option>
@@ -110,7 +294,12 @@ export function PasteComposer({
               <Select.Option value="markdown">Markdown</Select.Option>
             </Select>
           )}
-          <Select<Expiry> label="Expires" value={expiry} onValueChange={(value) => value && setExpiry(value)}>
+          <Select<Expiry>
+            label="Expires"
+            value={expiry}
+            disabled={saving || Boolean(uploadSession)}
+            onValueChange={(value) => value && setExpiry(value)}
+          >
             <Select.Option value="hour">1 hour</Select.Option>
             <Select.Option value="day">1 day</Select.Option>
             <Select.Option value="week">1 week</Select.Option>
@@ -122,6 +311,7 @@ export function PasteComposer({
             label="Paste"
             placeholder="Paste text or code here…"
             value={content}
+            disabled={saving || Boolean(uploadSession)}
             onChange={(event) => setContent(event.target.value)}
             rows={12}
             spellCheck={false}
@@ -137,49 +327,69 @@ export function PasteComposer({
         )}
         {showAttachments && (
           <>
-            <div className="file-picker">
-              <label className="file-picker-button">
-                <PaperclipIcon />
-                Choose files
+            {!uploadSession && (
+              <label
+                className={`file-dropzone${dragging ? " dragging" : ""}${saving ? " disabled" : ""}`}
+                onDragEnter={enterDropzone}
+                onDragOver={(event) => event.preventDefault()}
+                onDragLeave={leaveDropzone}
+                onDrop={dropFiles}
+              >
+                <PaperclipIcon size={22} />
+                <strong>Drop files here or choose files</strong>
+                <span>Up to {limits.maxFilesPerPaste} files · {formatBytes(limits.maxFileBytes)} each</span>
                 <input
                   type="file"
                   multiple
+                  disabled={saving || files.length >= limits.maxFilesPerPaste}
                   onChange={(event) => {
-                    const selected = Array.from(event.target.files ?? []);
-                    if (selected.length > limits.maxFilesPerPaste) {
-                      setFiles([]);
-                      setError(`Choose at most ${limits.maxFilesPerPaste} files.`);
-                      return;
-                    }
-                    const invalid = selected.find((file) => file.size === 0 || file.size > limits.maxFileBytes);
-                    if (invalid) {
-                      setFiles([]);
-                      setError(`${invalid.name} must be between 1 byte and ${formatBytes(limits.maxFileBytes)}.`);
-                      return;
-                    }
-                    setError(null);
-                    setFiles(selected);
+                    addFiles(Array.from(event.currentTarget.files ?? []));
+                    event.currentTarget.value = "";
                   }}
                 />
               </label>
-              <span>Up to {limits.maxFilesPerPaste} files · {formatBytes(limits.maxFileBytes)} each</span>
-            </div>
+            )}
+            {uploadSession && (
+              <div className="file-upload-note">Successful files are kept while you retry. Finish or discard before leaving this page.</div>
+            )}
             {files.length > 0 && (
-              <div className="selected-files">
-                {files.map((file, index) => (
-                  <div key={`${file.name}:${file.size}:${index}`}>
+              <div className="selected-files" aria-live="polite">
+                {files.map((selected) => (
+                  <div className={`selected-file ${selected.phase}`} key={selected.id}>
                     <FileIcon />
-                    <span>{file.name}</span>
-                    <small>{formatBytes(file.size)}</small>
-                    <Button
-                      type="button"
-                      size="xs"
-                      shape="square"
-                      variant="ghost"
-                      icon={XIcon}
-                      aria-label={`Remove ${file.name}`}
-                      onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                    />
+                    <div className="selected-file-details">
+                      <span>{selected.file.name}</span>
+                      <small title={selected.error}>{formatBytes(selected.file.size)} · {fileStatus(selected)}</small>
+                      {(selected.phase === "uploading" || selected.phase === "retrying") && (
+                        <progress max={100} value={selected.progress} aria-label={`${selected.file.name} upload progress`} />
+                      )}
+                    </div>
+                    <div className="selected-file-actions">
+                      {selected.phase === "error" && uploadSession && (
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="secondary"
+                          icon={ArrowClockwiseIcon}
+                          disabled={saving}
+                          onClick={() => retryFiles([selected])}
+                        >
+                          Retry
+                        </Button>
+                      )}
+                      {!uploadSession && (
+                        <Button
+                          type="button"
+                          size="xs"
+                          shape="square"
+                          variant="ghost"
+                          icon={XIcon}
+                          disabled={saving}
+                          aria-label={`Remove ${selected.file.name}`}
+                          onClick={() => setFiles((current) => current.filter((item) => item.id !== selected.id))}
+                        />
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -189,13 +399,31 @@ export function PasteComposer({
         <div className="composer-actions">
           <span><LockKeyIcon /> Encrypted with a new per-item key</span>
           <div>
-            <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
-            <Button type="submit" variant="primary" loading={saving}>
-              {progress ?? (kind === "files" ? "Encrypt & upload" : "Encrypt & save")}
+            <Button type="button" variant="ghost" disabled={saving} onClick={cancel}>
+              {uploadSession ? "Discard upload" : "Cancel"}
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={saving}
+              disabled={Boolean(uploadSession && !files.some((selected) => selected.phase === "error"))}
+            >
+              {progress ?? (uploadSession ? "Retry failed uploads" : kind === "files" ? "Encrypt & upload" : "Encrypt & save")}
             </Button>
           </div>
         </div>
       </form>
     </LayerCard>
   );
+}
+
+function fileStatus(selected: SelectedFile) {
+  switch (selected.phase) {
+    case "pending": return "Ready";
+    case "encrypting": return "Encrypting locally…";
+    case "uploading": return `Uploading ${selected.progress}%`;
+    case "retrying": return `Connection interrupted · retry ${selected.attempt} of ${selected.maxAttempts}`;
+    case "complete": return "Uploaded";
+    case "error": return selected.error ?? "Upload failed";
+  }
 }
