@@ -9,6 +9,7 @@ import {
   stageReservationDeletion,
   streamR2Object,
 } from "../repositories/attachments";
+import { findActiveOwnedPaste } from "../repositories/pastes";
 import { enqueuePendingDeletions, stageDeletion } from "../services/deletions";
 import { requireUser } from "../services/sessions";
 import type { AppContext, AppEnv } from "../types";
@@ -17,9 +18,7 @@ export const attachmentRoutes = new Hono<AppEnv>();
 
 attachmentRoutes.get("/api/pastes/:id/files", requireUser, async (c) => {
   const pasteId = c.req.param("id")!;
-  const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
-    .bind(pasteId, c.get("userId"))
-    .first();
+  const paste = await findActiveOwnedPaste(c.env.DB, pasteId, c.get("userId"));
   if (!paste) return c.json({ error: "Item not found" }, 404);
   return c.json({ attachments: await listAttachments(c.env.DB, pasteId) });
 });
@@ -109,20 +108,28 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
 });
 
 attachmentRoutes.get("/api/pastes/:pasteId/files/:fileId/content", requireUser, async (c) => {
+  const pasteId = c.req.param("pasteId")!;
+  const ownerId = c.get("userId");
+  if (!(await findActiveOwnedPaste(c.env.DB, pasteId, ownerId))) {
+    return c.json({ error: "Item not found" }, 404);
+  }
   const attachment = await c.env.DB.prepare(
     `SELECT a.object_key AS objectKey FROM attachments a JOIN pastes p ON p.id = a.paste_id
      WHERE a.id = ? AND p.id = ? AND p.owner_id = ?`,
   )
-    .bind(c.req.param("fileId"), c.req.param("pasteId"), c.get("userId"))
+    .bind(c.req.param("fileId"), pasteId, ownerId)
     .first<{ objectKey: string }>();
   if (!attachment) return c.json({ error: "Attachment not found" }, 404);
   return streamR2Object(c, attachment.objectKey);
 });
 
 attachmentRoutes.delete("/api/pastes/:pasteId/files/:fileId", requireUser, async (c) => {
-  const pasteId = c.req.param("pasteId");
-  const fileId = c.req.param("fileId");
+  const pasteId = c.req.param("pasteId")!;
+  const fileId = c.req.param("fileId")!;
   const ownerId = c.get("userId");
+  if (!(await findActiveOwnedPaste(c.env.DB, pasteId, ownerId))) {
+    return c.json({ error: "Item not found" }, 404);
+  }
   const attachment = await c.env.DB.prepare(
     `SELECT a.id, a.object_key AS objectKey, a.ciphertext_size AS ciphertextSize
      FROM attachments a JOIN pastes p ON p.id = a.paste_id

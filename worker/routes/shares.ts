@@ -4,22 +4,22 @@ import type { ShareWrite, StoredShare } from "../../shared/protocol/pastes";
 import { OPAQUE_ID } from "../lib/config";
 import { normalizeExpiry, readJson, SMALL_JSON_BODY_BYTES, validOpaque } from "../lib/http";
 import { listAttachments, streamR2Object } from "../repositories/attachments";
+import { findActiveOwnedPaste } from "../repositories/pastes";
 import { requireUser } from "../services/sessions";
 import type { AppEnv } from "../types";
 
 export const shareRoutes = new Hono<AppEnv>();
 
 shareRoutes.get("/api/pastes/:id/shares", requireUser, async (c) => {
-  const owned = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
-    .bind(c.req.param("id"), c.get("userId"))
-    .first();
+  const pasteId = c.req.param("id")!;
+  const owned = await findActiveOwnedPaste(c.env.DB, pasteId, c.get("userId"));
   if (!owned) return c.json({ error: "Item not found" }, 404);
 
   const shares = await c.env.DB.prepare(
     `SELECT id, created_at AS createdAt, expires_at AS expiresAt
      FROM shares WHERE paste_id = ? ORDER BY created_at DESC`,
   )
-    .bind(c.req.param("id"))
+    .bind(pasteId)
     .all<{ id: string; createdAt: number; expiresAt: number | null }>();
   return c.json({ shares: shares.results });
 });
@@ -30,9 +30,8 @@ shareRoutes.post("/api/pastes/:id/shares", requireUser, async (c) => {
     return c.json({ error: "Invalid encrypted share" }, 400);
   }
 
-  const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
-    .bind(c.req.param("id"), c.get("userId"))
-    .first();
+  const pasteId = c.req.param("id")!;
+  const paste = await findActiveOwnedPaste(c.env.DB, pasteId, c.get("userId"));
   if (!paste) return c.json({ error: "Item not found" }, 404);
 
   const now = Date.now();
@@ -40,7 +39,7 @@ shareRoutes.post("/api/pastes/:id/shares", requireUser, async (c) => {
     await c.env.DB.prepare(
       "INSERT INTO shares (id, paste_id, wrapped_key, wrapped_key_iv, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
-      .bind(body.id, c.req.param("id"), body.wrappedKey, body.wrappedKeyIv, now, normalizeExpiry(body.expiresAt))
+      .bind(body.id, pasteId, body.wrappedKey, body.wrappedKeyIv, now, normalizeExpiry(body.expiresAt))
       .run();
   } catch {
     return c.json({ error: "Share ID already exists" }, 409);
@@ -49,11 +48,12 @@ shareRoutes.post("/api/pastes/:id/shares", requireUser, async (c) => {
 });
 
 shareRoutes.delete("/api/pastes/:pasteId/shares/:shareId", requireUser, async (c) => {
-  const result = await c.env.DB.prepare(
-    `DELETE FROM shares WHERE id = ? AND paste_id = ? AND paste_id IN
-      (SELECT id FROM pastes WHERE owner_id = ?)`,
-  )
-    .bind(c.req.param("shareId"), c.req.param("pasteId"), c.get("userId"))
+  const pasteId = c.req.param("pasteId")!;
+  if (!(await findActiveOwnedPaste(c.env.DB, pasteId, c.get("userId")))) {
+    return c.json({ error: "Item not found" }, 404);
+  }
+  const result = await c.env.DB.prepare("DELETE FROM shares WHERE id = ? AND paste_id = ?")
+    .bind(c.req.param("shareId"), pasteId)
     .run();
   if (!result.meta.changes) return c.json({ error: "Share not found" }, 404);
   return c.body(null, 204);

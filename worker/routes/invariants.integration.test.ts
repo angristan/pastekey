@@ -56,6 +56,40 @@ describe("concurrent account invariants", () => {
     expect(count?.count).toBe(100);
   });
 
+  it("does not revive an expired item through update", async () => {
+    const now = Date.now();
+    const pasteId = "expired-paste-00000001";
+    await bindings.DB.batch([
+      bindings.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(userId, now),
+      bindings.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
+        .bind(await hashToken(token), userId, now, now + 60_000),
+      bindings.DB.prepare(
+        `INSERT INTO pastes (
+          id, owner_id, ciphertext, content_iv, wrapped_key, wrapped_key_iv,
+          created_at, updated_at, expires_at
+        ) VALUES (?, ?, 'AA', 'AA', 'AA', 'AA', ?, ?, ?)`,
+      ).bind(pasteId, userId, now, now, now - 1),
+    ]);
+
+    const response = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}`, {
+      method: "PUT",
+      headers: { Cookie: `pk_session=${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ciphertext: "AQ",
+        contentIv: "AQ",
+        wrappedKey: "AQ",
+        wrappedKeyIv: "AQ",
+        expiresAt: now + 60_000,
+      }),
+    });
+
+    expect(response.status).toBe(404);
+    const paste = await bindings.DB.prepare("SELECT ciphertext, expires_at AS expiresAt FROM pastes WHERE id = ?")
+      .bind(pasteId)
+      .first<{ ciphertext: string; expiresAt: number }>();
+    expect(paste).toEqual({ ciphertext: "AA", expiresAt: now - 1 });
+  });
+
   it("preserves one passkey across concurrent deletion requests", async () => {
     const now = Date.now();
     const credential = (id: string) => bindings.DB.prepare(

@@ -31,6 +31,31 @@ describe("share-link routes", () => {
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
   });
 
+  it("rejects share management after the item expires", async () => {
+    await bindings.DB.prepare(
+      "INSERT INTO shares (id, paste_id, wrapped_key, wrapped_key_iv, created_at, expires_at) VALUES (?, ?, 'AA', 'AA', ?, NULL)",
+    ).bind(shareId, pasteId, Date.now()).run();
+    await bindings.DB.prepare("UPDATE pastes SET expires_at = ? WHERE id = ?")
+      .bind(Date.now() - 1, pasteId)
+      .run();
+
+    const list = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/shares`, { headers: authHeaders });
+    expect(list.status).toBe(404);
+
+    const create = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/shares`, {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "another-share-00000001", wrappedKey: "AA", wrappedKeyIv: "AA" }),
+    });
+    expect(create.status).toBe(404);
+
+    const revoke = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/shares/${shareId}`, {
+      method: "DELETE",
+      headers: authHeaders,
+    });
+    expect(revoke.status).toBe(404);
+  });
+
   it("creates, lists, reads, and revokes an encrypted link", async () => {
     const create = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/shares`, {
       method: "POST",

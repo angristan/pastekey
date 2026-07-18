@@ -36,6 +36,17 @@ describe("authenticated attachment routes", () => {
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
   });
 
+  it("rejects attachment access after the item expires", async () => {
+    await bindings.DB.prepare("UPDATE pastes SET expires_at = ? WHERE id = ?")
+      .bind(Date.now() - 1, pasteId)
+      .run();
+
+    const response = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/files`, {
+      headers: { Cookie: `pk_session=${token}` },
+    });
+    expect(response.status).toBe(404);
+  });
+
   it("rejects a file identity reserved by pending deletion", async () => {
     await bindings.DB.prepare(
       `INSERT INTO deletion_jobs (id, owner_id, object_key, ciphertext_size, created_at, queued_at)

@@ -1,30 +1,26 @@
 import { Hono } from "hono";
 
-import type { PasteWrite, StoredPaste } from "../../shared/protocol/pastes";
+import type { PasteWrite } from "../../shared/protocol/pastes";
 import { MAX_CIPHERTEXT_LENGTH, OPAQUE_ID, serviceLimits } from "../lib/config";
 import { normalizeExpiry, PASTE_JSON_BODY_BYTES, readJson, validExpiry, validOpaque } from "../lib/http";
+import {
+  findActiveOwnedPaste,
+  listActiveOwnedPastes,
+  updateActiveOwnedPaste,
+} from "../repositories/pastes";
 import { enqueuePendingDeletions } from "../services/deletions";
 import { requireUser } from "../services/sessions";
-import type { AppContext, AppEnv } from "../types";
+import type { AppEnv } from "../types";
 
 export const pasteRoutes = new Hono<AppEnv>();
 
 pasteRoutes.get("/api/pastes", requireUser, async (c) => {
-  const rows = await c.env.DB.prepare(
-    `SELECT id, ciphertext, content_iv AS contentIv, wrapped_key AS wrappedKey,
-      wrapped_key_iv AS wrappedKeyIv, created_at AS createdAt, updated_at AS updatedAt,
-      expires_at AS expiresAt, version
-     FROM pastes
-     WHERE owner_id = ? AND (expires_at IS NULL OR expires_at > ?)
-     ORDER BY updated_at DESC`,
-  )
-    .bind(c.get("userId"), Date.now())
-    .all<StoredPaste>();
+  const rows = await listActiveOwnedPastes(c.env.DB, c.get("userId"));
   return c.json({ pastes: rows.results });
 });
 
 pasteRoutes.get("/api/pastes/:id", requireUser, async (c) => {
-  const paste = await getOwnedPaste(c, c.req.param("id")!);
+  const paste = await findActiveOwnedPaste(c.env.DB, c.req.param("id")!, c.get("userId"));
   if (!paste) return c.json({ error: "Item not found" }, 404);
   return c.json(paste);
 });
@@ -78,22 +74,15 @@ pasteRoutes.put("/api/pastes/:id", requireUser, async (c) => {
   const id = c.req.param("id")!;
   if (!validPasteWrite(body ? { ...body, id } : null)) return c.json({ error: "Invalid encrypted item" }, 400);
 
-  const result = await c.env.DB.prepare(
-    `UPDATE pastes SET ciphertext = ?, content_iv = ?, wrapped_key = ?, wrapped_key_iv = ?,
-      updated_at = ?, expires_at = ?, version = version + 1
-     WHERE id = ? AND owner_id = ?`,
-  )
-    .bind(
-      body!.ciphertext,
-      body!.contentIv,
-      body!.wrappedKey,
-      body!.wrappedKeyIv,
-      Date.now(),
-      normalizeExpiry(body!.expiresAt),
-      id,
-      c.get("userId"),
-    )
-    .run();
+  const now = Date.now();
+  const result = await updateActiveOwnedPaste(
+    c.env.DB,
+    id,
+    c.get("userId"),
+    body!,
+    now,
+    normalizeExpiry(body!.expiresAt),
+  );
   if (!result.meta.changes) return c.json({ error: "Item not found" }, 404);
   return c.json({ id });
 });
@@ -120,17 +109,6 @@ pasteRoutes.delete("/api/pastes/:id", requireUser, async (c) => {
   );
   return c.body(null, 204);
 });
-
-async function getOwnedPaste(c: AppContext, id: string) {
-  return c.env.DB.prepare(
-    `SELECT id, ciphertext, content_iv AS contentIv, wrapped_key AS wrappedKey,
-      wrapped_key_iv AS wrappedKeyIv, created_at AS createdAt, updated_at AS updatedAt,
-      expires_at AS expiresAt, version
-     FROM pastes WHERE id = ? AND owner_id = ? AND (expires_at IS NULL OR expires_at > ?)`,
-  )
-    .bind(id, c.get("userId"), Date.now())
-    .first<StoredPaste>();
-}
 
 function validPasteWrite(body: PasteWrite | null): body is PasteWrite {
   return Boolean(
