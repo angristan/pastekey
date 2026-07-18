@@ -14,17 +14,16 @@ import {
   ShareNetworkIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { api } from "../../lib/api";
 import { downloadAttachment, type UnlockedAttachment } from "../../lib/attachments";
-import { decryptAttachmentMetadata } from "../../lib/crypto";
 import { formatBytes, formatDate, formatExpiry, messageOf } from "../../lib/format";
-import { settledValues } from "../../lib/settled";
-import type { StoredAttachment } from "../../../shared/protocol/attachments";
 import { itemKindOf } from "../../../shared/protocol/pastes";
-import { mergeShares, type GeneratedShare, type ShareSummary } from "./share-state";
+import type { ShareSummary } from "./share-state";
 import type { UnlockedPaste } from "./types";
+import { usePasteShares } from "./usePasteShares";
+import { useUnlockedAttachments } from "./useUnlockedAttachments";
 
 const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
 
@@ -38,17 +37,36 @@ export function PasteCard({
   onDelete: () => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [shares, setShares] = useState<ShareSummary[] | null>(null);
-  const [attachments, setAttachments] = useState<UnlockedAttachment[] | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
-  const [generatedShares, setGeneratedShares] = useState<GeneratedShare[]>([]);
   const [copiedPaste, setCopiedPaste] = useState(false);
-  const [sharing, setSharing] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [loadingShares, setLoadingShares] = useState(false);
-  const [loadingFiles, setLoadingFiles] = useState(false);
-  const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
   const fileItem = itemKindOf(paste.payload) === "files";
+  const {
+    attachments,
+    loading: loadingFiles,
+    remove: removeAttachment,
+    toggle: toggleFiles,
+  } = useUnlockedAttachments({
+    pasteId: paste.stored.id,
+    pasteKey: paste.pasteKey,
+    loadOnMount: fileItem,
+    onFailure: setPanelError,
+  });
+  const {
+    copy: copyShareLink,
+    create: createShare,
+    generatedShares,
+    loading: loadingShares,
+    revoke: revokeShare,
+    revokingId: revokingShareId,
+    shares,
+    sharing,
+    toggle: toggleShares,
+  } = usePasteShares({
+    pasteId: paste.stored.id,
+    createEnvelope: onShare,
+    onError: setPanelError,
+  });
   const primaryAttachment = attachments?.length === 1 ? attachments[0] : null;
   const generatedFileTitle = fileItem && (
     paste.payload.title === "File drop" ||
@@ -67,118 +85,10 @@ export function PasteCard({
         : `${attachments.length} ${attachments.length === 1 ? "file" : "files"}`
     : paste.payload.language;
 
-  useEffect(() => {
-    if (!fileItem) return;
-    let active = true;
-    setPanelError(null);
-    loadAttachments()
-      .then((result) => {
-        if (!active) return;
-        setAttachments(result.values);
-        if (result.failureCount) {
-          setPanelError(`${result.failureCount} encrypted ${result.failureCount === 1 ? "file could" : "files could"} not be decrypted.`);
-        }
-      })
-      .catch((cause) => active && setPanelError(messageOf(cause)));
-    return () => { active = false; };
-  }, [fileItem, paste.stored.id, paste.pasteKey]);
-
-  async function loadShares() {
-    const result = await api<{ shares: ShareSummary[] }>(`/api/pastes/${paste.stored.id}/shares`);
-    return result.shares;
-  }
-
-  async function toggleShares() {
-    if (shares !== null) {
-      setShares(null);
-      return;
-    }
-    setPanelError(null);
-    setLoadingShares(true);
-    try {
-      setShares(await loadShares());
-    } catch (cause) {
-      setPanelError(messageOf(cause));
-    } finally {
-      setLoadingShares(false);
-    }
-  }
-
-  async function createShare() {
-    setPanelError(null);
-    setSharing(true);
-    try {
-      const existing = shares ?? await loadShares();
-      const created = await onShare();
-      setShares(mergeShares([created.share], existing));
-      setGeneratedShares((current) => [
-        { shareId: created.share.id, url: created.url, copied: false },
-        ...current,
-      ]);
-    } catch (cause) {
-      setPanelError(messageOf(cause));
-    } finally {
-      setSharing(false);
-    }
-  }
-
-  async function copyShareLink(generated: GeneratedShare) {
-    try {
-      await navigator.clipboard.writeText(generated.url);
-      setGeneratedShares((current) => current.map((share) =>
-        share.shareId === generated.shareId ? { ...share, copied: true } : share,
-      ));
-    } catch (cause) {
-      setPanelError(messageOf(cause));
-    }
-  }
-
-  async function revokeShare(id: string) {
-    if (!window.confirm("Revoke this share link? Anyone using it will immediately lose access.")) return;
-    setPanelError(null);
-    setRevokingShareId(id);
-    try {
-      await api<void>(`/api/pastes/${paste.stored.id}/shares/${id}`, { method: "DELETE" });
-      setShares((current) => current?.filter((share) => share.id !== id) ?? []);
-      setGeneratedShares((current) => current.filter(({ shareId }) => shareId !== id));
-    } catch (cause) {
-      setPanelError(messageOf(cause));
-    } finally {
-      setRevokingShareId(null);
-    }
-  }
-
-  async function loadAttachments() {
-    const result = await api<{ attachments: StoredAttachment[] }>(`/api/pastes/${paste.stored.id}/files`);
-    return settledValues(
-      result.attachments.map(async (stored) => ({ stored, ...(await decryptAttachmentMetadata(paste.pasteKey, stored)) })),
-    );
-  }
-
-  async function toggleFiles() {
-    if (attachments !== null) {
-      setAttachments(null);
-      return;
-    }
-    setPanelError(null);
-    setLoadingFiles(true);
-    try {
-      const result = await loadAttachments();
-      setAttachments(result.values);
-      if (result.failureCount) {
-        setPanelError(`${result.failureCount} encrypted ${result.failureCount === 1 ? "file could" : "files could"} not be decrypted.`);
-      }
-    } catch (cause) {
-      setPanelError(messageOf(cause));
-    } finally {
-      setLoadingFiles(false);
-    }
-  }
-
   async function removeFile(attachment: UnlockedAttachment) {
     if (!window.confirm(`Remove “${attachment.metadata.name}” from this item? This cannot be undone.`)) return;
     await api<void>(`/api/pastes/${paste.stored.id}/files/${attachment.stored.id}`, { method: "DELETE" });
-    setAttachments((current) => current?.filter((item) => item.stored.id !== attachment.stored.id) ?? []);
+    removeAttachment(attachment.stored.id);
   }
 
   async function copyPaste() {

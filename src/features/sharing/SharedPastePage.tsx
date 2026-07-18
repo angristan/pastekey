@@ -12,9 +12,9 @@ import { Brand, GitHubLink } from "../../components/Brand";
 import { CenteredStatus } from "../../components/CenteredStatus";
 import { api } from "../../lib/api";
 import type { UnlockedAttachment } from "../../lib/attachments";
-import { decryptAttachmentMetadata, decryptSharedPaste } from "../../lib/crypto";
+import { decryptSharedPaste } from "../../lib/crypto";
 import { formatDate, messageOf } from "../../lib/format";
-import { settledValues } from "../../lib/settled";
+import { unlockAttachments } from "../pastes/useUnlockedAttachments";
 import { itemKindOf, type PastePayload, type StoredShare } from "../../../shared/protocol/pastes";
 
 const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
@@ -39,12 +39,7 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
         setMetadata(stored);
         const unlocked = await decryptSharedPaste(stored, secret);
         setPayload(unlocked.payload);
-        const decryptedAttachments = await settledValues(
-          stored.attachments.map(async (attachment) => ({
-            stored: attachment,
-            ...(await decryptAttachmentMetadata(unlocked.pasteKey, attachment)),
-          })),
-        );
+        const decryptedAttachments = await unlockAttachments(stored.attachments, unlocked.pasteKey);
         setAttachments(decryptedAttachments.values);
         if (decryptedAttachments.failureCount) {
           setPanelError(
