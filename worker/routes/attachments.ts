@@ -11,7 +11,7 @@ import {
 } from "../repositories/attachments";
 import { enqueuePendingDeletions, stageDeletion } from "../services/deletions";
 import { requireUser } from "../services/sessions";
-import type { AppEnv } from "../types";
+import type { AppContext, AppEnv } from "../types";
 
 export const attachmentRoutes = new Hono<AppEnv>();
 
@@ -80,8 +80,7 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
       httpMetadata: { contentType: "application/octet-stream" },
     });
   } catch {
-    await stageReservationDeletion(c.env.DB, fileId);
-    c.executionCtx.waitUntil(enqueuePendingDeletions(c.env));
+    await cleanupRejectedUpload(c, fileId, objectKey);
     return c.json({ error: "Encrypted attachment upload failed" }, 503);
   }
 
@@ -98,13 +97,11 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
       createdAt: now,
     });
   } catch {
-    await stageReservationDeletion(c.env.DB, fileId);
-    c.executionCtx.waitUntil(enqueuePendingDeletions(c.env));
+    await cleanupRejectedUpload(c, fileId, objectKey);
     return c.json({ error: "Attachment could not be saved" }, 409);
   }
   if (!finalized.meta.changes) {
-    await stageReservationDeletion(c.env.DB, fileId);
-    c.executionCtx.waitUntil(enqueuePendingDeletions(c.env));
+    await cleanupRejectedUpload(c, fileId, objectKey);
     return c.json({ error: "Item is no longer available" }, 409);
   }
 
@@ -144,3 +141,15 @@ attachmentRoutes.delete("/api/pastes/:pasteId/files/:fileId", requireUser, async
   );
   return c.body(null, 204);
 });
+
+async function cleanupRejectedUpload(c: AppContext, reservationId: string, objectKey: string) {
+  // A failed or ambiguous R2 PUT may still have committed. Delete directly while the
+  // request is alive and retain the durable outbox path for crash recovery.
+  await Promise.allSettled([
+    c.env.FILES.delete(objectKey),
+    stageReservationDeletion(c.env.DB, reservationId),
+  ]);
+  c.executionCtx.waitUntil(
+    enqueuePendingDeletions(c.env).catch(() => console.error("Could not dispatch rejected upload deletion")),
+  );
+}
