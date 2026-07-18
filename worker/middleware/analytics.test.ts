@@ -10,6 +10,7 @@ describe("Analytics Engine operation classification", () => {
     ["POST", "/api/auth/login/verify", "auth_login_verify"],
     ["POST", "/api/auth/passkeys/options", "passkey_add_options"],
     ["DELETE", "/api/auth/passkeys/secret-credential-id", "passkey_remove"],
+    ["DELETE", "/api/account", "account_delete"],
     ["POST", "/api/pastes", "item_create"],
     ["PUT", "/api/pastes/secret-item-id", "item_update"],
     ["DELETE", "/api/pastes/secret-item-id", "item_delete"],

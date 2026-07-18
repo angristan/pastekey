@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { StoredPaste } from "../../src/lib/types";
 import { MAX_CIPHERTEXT_LENGTH, OPAQUE_ID, serviceLimits } from "../lib/config";
 import { normalizeExpiry, readJson, validExpiry, validOpaque } from "../lib/http";
+import { enqueuePendingDeletions, stageDeletion } from "../services/deletions";
 import { requireUser } from "../services/sessions";
 import type { AppContext, AppEnv, PasteWrite } from "../types";
 
@@ -92,18 +93,26 @@ pasteRoutes.put("/api/pastes/:id", requireUser, async (c) => {
 
 pasteRoutes.delete("/api/pastes/:id", requireUser, async (c) => {
   const pasteId = c.req.param("id")!;
-  const objects = await c.env.DB.prepare(
-    `SELECT a.object_key AS objectKey FROM attachments a JOIN pastes p ON p.id = a.paste_id
-     WHERE p.id = ? AND p.owner_id = ?`,
-  )
-    .bind(pasteId, c.get("userId"))
-    .all<{ objectKey: string }>();
-  if (objects.results.length) await c.env.FILES.delete(objects.results.map((item) => item.objectKey));
+  const ownerId = c.get("userId");
+  const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
+    .bind(pasteId, ownerId)
+    .first();
+  if (!paste) return c.json({ error: "Item not found" }, 404);
 
-  const result = await c.env.DB.prepare("DELETE FROM pastes WHERE id = ? AND owner_id = ?")
-    .bind(pasteId, c.get("userId"))
-    .run();
-  if (!result.meta.changes) return c.json({ error: "Item not found" }, 404);
+  const objects = await c.env.DB.prepare(
+    `SELECT a.id, a.object_key AS objectKey, a.ciphertext_size AS ciphertextSize
+     FROM attachments a WHERE a.paste_id = ?`,
+  )
+    .bind(pasteId)
+    .all<{ id: string; objectKey: string; ciphertextSize: number }>();
+
+  await c.env.DB.batch([
+    ...objects.results.map((item) => stageDeletion(c.env.DB, { ...item, ownerId })),
+    c.env.DB.prepare("DELETE FROM pastes WHERE id = ? AND owner_id = ?").bind(pasteId, ownerId),
+  ]);
+  c.executionCtx.waitUntil(
+    enqueuePendingDeletions(c.env).catch(() => console.error("Could not dispatch pending ciphertext deletions")),
+  );
   return c.body(null, 204);
 });
 

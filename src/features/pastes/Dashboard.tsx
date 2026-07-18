@@ -1,7 +1,16 @@
 import { Banner } from "@cloudflare/kumo/components/banner";
 import { Button } from "@cloudflare/kumo/components/button";
 import { LayerCard } from "@cloudflare/kumo/components/layer-card";
-import { CheckIcon, FileTextIcon, KeyIcon, LockKeyIcon, PlusIcon, SignOutIcon, UploadSimpleIcon } from "@phosphor-icons/react";
+import {
+  CheckIcon,
+  FileTextIcon,
+  KeyIcon,
+  LockKeyIcon,
+  PlusIcon,
+  SignOutIcon,
+  TrashIcon,
+  UploadSimpleIcon,
+} from "@phosphor-icons/react";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { Brand, GitHubLink } from "../../components/Brand";
@@ -19,12 +28,14 @@ export function Dashboard({
   accountKey,
   config,
   me,
+  onAccountDeleted,
   onLogout,
   onRefreshMe,
 }: {
   accountKey: CryptoKey;
   config: AppConfig;
   me: MeResponse;
+  onAccountDeleted: () => void;
   onLogout: () => Promise<void>;
   onRefreshMe: () => Promise<void>;
 }) {
@@ -34,6 +45,7 @@ export function Dashboard({
   const [notice, setNotice] = useState<string | null>(null);
   const [creator, setCreator] = useState<ItemKind | "choose" | null>(null);
   const [addingPasskey, setAddingPasskey] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const loadPastes = useCallback(async () => {
     setLoading(true);
@@ -79,6 +91,22 @@ export function Dashboard({
       share: { id: created.id, createdAt: created.createdAt, expiresAt: share.write.expiresAt },
       url,
     };
+  }
+
+  async function deleteAccount() {
+    if (!window.confirm("Permanently delete this account, every encrypted item, every file, and every share?")) return;
+    if (window.prompt('Type "DELETE" to confirm. This cannot be undone.') !== "DELETE") return;
+
+    setDeletingAccount(true);
+    setError(null);
+    try {
+      await api<{ status: "deleting" }>("/api/account", { method: "DELETE" });
+      window.alert("Account deletion started. Access has been revoked and encrypted storage is being removed.");
+      onAccountDeleted();
+    } catch (cause) {
+      setError(messageOf(cause));
+      setDeletingAccount(false);
+    }
   }
 
   async function addPasskey() {
@@ -193,6 +221,24 @@ export function Dashboard({
             <PasteCard key={paste.stored.id} paste={paste} onShare={() => sharePaste(paste)} onDelete={() => deletePaste(paste)} />
           ))
         )}
+      </section>
+
+      <section className="account-management" aria-label="Account management">
+        <div>
+          <strong>Delete account</strong>
+          <span>Permanently revoke access and remove all encrypted data.</span>
+        </div>
+        <Button
+          className="delete-account-button"
+          size="sm"
+          variant="ghost"
+          icon={TrashIcon}
+          loading={deletingAccount}
+          disabled={creator !== null}
+          onClick={deleteAccount}
+        >
+          Delete account
+        </Button>
       </section>
     </main>
   );

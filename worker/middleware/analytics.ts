@@ -9,6 +9,7 @@ export type AnalyticsOperation =
   | "auth_login_verify"
   | "passkey_add_options"
   | "passkey_remove"
+  | "account_delete"
   | "item_create"
   | "item_update"
   | "item_delete"
@@ -62,6 +63,7 @@ export function analyticsOperation(method: string, pathname: string): AnalyticsO
   }
 
   if (method === "DELETE") {
+    if (pathname === "/api/account") return "account_delete";
     if (segments.length === 4 && segments[0] === "api" && segments[1] === "auth" && segments[2] === "passkeys") {
       return "passkey_remove";
     }

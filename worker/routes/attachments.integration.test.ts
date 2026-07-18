@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
-import { SELF } from "cloudflare:test";
+import { createExecutionContext, createMessageBatch, getQueueResult, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { hashToken } from "../lib/encoding";
-import type { Bindings } from "../types";
+import { consumeDeletionQueue } from "../services/deletions";
+import type { Bindings, DeletionMessage } from "../types";
 
 const bindings = env as unknown as Bindings;
 const userId = "testuser12345678901234";
@@ -29,7 +30,30 @@ describe("authenticated attachment routes", () => {
 
   afterEach(async () => {
     await bindings.FILES.delete(objectKey);
+    await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("queues individual file deletion without leaving metadata", async () => {
+    const now = Date.now();
+    await bindings.DB.prepare(
+      `INSERT INTO attachments (
+        id, paste_id, object_key, ciphertext_size, content_iv, wrapped_key, wrapped_key_iv,
+        metadata_ciphertext, metadata_iv, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(fileId, pasteId, objectKey, 32, "AA", "AA", "AA", "AA", "AA", now)
+      .run();
+    await bindings.FILES.put(objectKey, new Uint8Array(32));
+
+    const response = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/files/${fileId}`, {
+      method: "DELETE",
+      headers: { Cookie: `pk_session=${token}` },
+    });
+    expect(response.status).toBe(204);
+    expect(await bindings.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first()).toBeNull();
+    expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(fileId).first()).not.toBeNull();
+    expect(await bindings.FILES.get(objectKey)).not.toBeNull();
   });
 
   it("uploads, lists, downloads, and removes opaque ciphertext", async () => {
@@ -63,7 +87,19 @@ describe("authenticated attachment routes", () => {
 
     const remove = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}`, { method: "DELETE", headers });
     expect(remove.status).toBe(204);
-    expect(await bindings.FILES.get(objectKey)).toBeNull();
     expect(await bindings.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first()).toBeNull();
+    expect(await bindings.FILES.get(objectKey)).not.toBeNull();
+    expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(fileId).first()).not.toBeNull();
+
+    const batch = createMessageBatch<DeletionMessage>("pastekey-deletions", [
+      { id: "message-1", timestamp: new Date(), attempts: 1, body: { jobId: fileId } },
+    ]);
+    const context = createExecutionContext();
+    await consumeDeletionQueue(batch, bindings);
+    const queueResult = await getQueueResult(batch, context);
+
+    expect(queueResult.explicitAcks).toContain("message-1");
+    expect(await bindings.FILES.get(objectKey)).toBeNull();
+    expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(fileId).first()).toBeNull();
   });
 });

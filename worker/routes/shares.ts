@@ -66,7 +66,9 @@ shareRoutes.get("/api/shares/:id", async (c) => {
       s.wrapped_key AS wrappedKey, s.wrapped_key_iv AS wrappedKeyIv,
       s.created_at AS createdAt, p.updated_at AS updatedAt, s.expires_at AS expiresAt
      FROM shares s JOIN pastes p ON p.id = s.paste_id
-     WHERE s.id = ? AND (s.expires_at IS NULL OR s.expires_at > ?)
+     JOIN users u ON u.id = p.owner_id
+     WHERE s.id = ? AND u.deletion_requested_at IS NULL
+       AND (s.expires_at IS NULL OR s.expires_at > ?)
        AND (p.expires_at IS NULL OR p.expires_at > ?)`,
   )
     .bind(c.req.param("id"), now, now)
@@ -80,8 +82,9 @@ shareRoutes.get("/api/shares/:shareId/files/:fileId/content", async (c) => {
   const attachment = await c.env.DB.prepare(
     `SELECT a.object_key AS objectKey FROM attachments a
      JOIN pastes p ON p.id = a.paste_id
+     JOIN users u ON u.id = p.owner_id
      JOIN shares s ON s.paste_id = p.id
-     WHERE a.id = ? AND s.id = ?
+     WHERE a.id = ? AND s.id = ? AND u.deletion_requested_at IS NULL
        AND (s.expires_at IS NULL OR s.expires_at > ?)
        AND (p.expires_at IS NULL OR p.expires_at > ?)`,
   )

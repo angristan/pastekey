@@ -26,6 +26,7 @@ Passkey PRF ──HKDF──> passkey wrapping key
 - Raster images, audio, video, and text can be decrypted for an on-demand local preview; active HTML, SVG, XML, and unknown formats are never embedded.
 - Share links contain a random secret after `#`; URL fragments are not sent to the server. A new link is shown for copying only in the browser session that created it.
 - Revoking a share deletes its wrapped paste-key envelope. It cannot revoke plaintext already copied by a recipient.
+- Account deletion immediately revokes sessions and shares, then a durable Workflow removes R2 ciphertext in bounded retryable batches before deleting account metadata.
 - D1 and R2 still expose metadata: account/paste/file counts, timestamps, ciphertext sizes, expiry, and access metadata.
 - Analytics Engine records only fixed operation names, outcomes, coarse encrypted-file size buckets, duration, and HTTP status. It never receives paths, identifiers, IP addresses, filenames, or content.
 - Losing every passkey means losing the vault. There is no server-side reset in this version.
@@ -36,7 +37,9 @@ Passkey PRF ──HKDF──> passkey wrapping key
 - Cloudflare D1 metadata + R2 encrypted attachment storage
 - Workers Rate Limiting + Turnstile registration protection
 - Workers Analytics Engine for identifier-free product and reliability metrics
-- Hourly cleanup for expired D1 records and R2 objects
+- Cloudflare Queues for retryable routine ciphertext deletion
+- Cloudflare Workflows for durable account deletion
+- Hourly expiry cleanup backed by a transactional D1 deletion outbox
 - React + Vite + Cloudflare Vite plugin
 - Cloudflare Kumo components
 - SimpleWebAuthn server verification
@@ -58,7 +61,8 @@ worker/
 ├── routes/              # Auth, paste, attachment, and sharing HTTP boundaries
 ├── middleware/          # Cross-cutting request policy
 ├── repositories/        # D1/R2 persistence adapters
-├── services/            # Sessions, Turnstile, retention cleanup
+├── services/            # Sessions, Turnstile, queued retention cleanup
+├── workflows/           # Durable multi-step account deletion
 ├── lib/                 # Validation, encoding, and configuration
 └── index.ts             # Composition root only
 ```
@@ -84,6 +88,8 @@ Create D1 and R2 resources, put their bindings in `wrangler.jsonc`, configure yo
 ```bash
 bunx wrangler d1 create pastekey
 bunx wrangler r2 bucket create pastekey-files
+bunx wrangler queues create pastekey-deletions
+bunx wrangler queues create pastekey-deletions-dlq
 bunx wrangler secret put TURNSTILE_SECRET_KEY
 bun run db:migrate:remote
 bun run deploy

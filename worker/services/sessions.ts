@@ -17,7 +17,10 @@ export async function requireUser(c: AppContext, next: Next) {
 export async function currentUser(c: AppContext) {
   const token = getCookie(c, SESSION_COOKIE);
   if (!token) return null;
-  const session = await c.env.DB.prepare("SELECT user_id FROM sessions WHERE id = ? AND expires_at > ?")
+  const session = await c.env.DB.prepare(
+    `SELECT s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.id = ? AND s.expires_at > ? AND u.deletion_requested_at IS NULL`,
+  )
     .bind(await hashToken(token), Date.now())
     .first<{ user_id: string }>();
   return session?.user_id ?? null;
@@ -26,9 +29,13 @@ export async function currentUser(c: AppContext) {
 export async function createSession(c: AppContext, userId: string) {
   const token = randomId(32);
   const now = Date.now();
-  await c.env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
-    .bind(await hashToken(token), userId, now, now + SESSION_TTL_SECONDS * 1000)
+  const result = await c.env.DB.prepare(
+    `INSERT INTO sessions (id, user_id, created_at, expires_at)
+     SELECT ?, id, ?, ? FROM users WHERE id = ? AND deletion_requested_at IS NULL`,
+  )
+    .bind(await hashToken(token), now, now + SESSION_TTL_SECONDS * 1000, userId)
     .run();
+  if (!result.meta.changes) throw new Error("Account is unavailable");
   setCookie(c, SESSION_COOKIE, token, cookieOptions(c, SESSION_TTL_SECONDS, "/"));
 }
 

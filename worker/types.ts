@@ -4,6 +4,8 @@ export type Bindings = {
   DB: D1Database;
   FILES: R2Bucket;
   EVENTS: AnalyticsEngineDataset;
+  DELETION_QUEUE: Queue<DeletionMessage>;
+  ACCOUNT_DELETION: Workflow<AccountDeletionPayload>;
   AUTH_RATE_LIMITER: RateLimit;
   WRITE_RATE_LIMITER: RateLimit;
   MAX_FILE_BYTES?: string;
@@ -27,6 +29,23 @@ export type AppEnv = {
 };
 
 export type AppContext = Context<AppEnv>;
+
+export type DeletionMessage = {
+  jobId: string;
+};
+
+export type AccountDeletionPayload = {
+  userId: string;
+};
+
+export type DeletionJobRow = {
+  id: string;
+  owner_id: string;
+  object_key: string;
+  ciphertext_size: number;
+  created_at: number;
+  queued_at: number | null;
+};
 
 export type ChallengeRow = {
   id: string;

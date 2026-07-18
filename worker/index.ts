@@ -5,12 +5,16 @@ import type { AppConfig } from "../src/lib/types";
 import { serviceLimits } from "./lib/config";
 import { recordApiAnalytics } from "./middleware/analytics";
 import { rateLimitMutations } from "./middleware/rate-limit";
+import { accountRoutes } from "./routes/account";
 import { attachmentRoutes } from "./routes/attachments";
 import { authRoutes } from "./routes/auth";
 import { pasteRoutes } from "./routes/pastes";
 import { shareRoutes } from "./routes/shares";
 import { cleanupExpired } from "./services/cleanup";
-import type { AppEnv, Bindings } from "./types";
+import { consumeDeletionQueue } from "./services/deletions";
+import type { AppEnv, Bindings, DeletionMessage } from "./types";
+
+export { AccountDeletionWorkflow } from "./workflows/account-deletion";
 
 const app = new Hono<AppEnv>();
 
@@ -21,6 +25,7 @@ app.use("/api/*", async (c, next) => {
 });
 app.use("/api/*", recordApiAnalytics());
 app.use("/api/auth/*", rateLimitMutations("AUTH_RATE_LIMITER", "auth", ["POST"]));
+app.use("/api/account", rateLimitMutations("WRITE_RATE_LIMITER", "write", ["DELETE"]));
 app.use("/api/pastes/*", rateLimitMutations("WRITE_RATE_LIMITER", "write", ["POST", "PUT", "DELETE"]));
 
 app.get("/api/health", (c) => c.json({ ok: true }));
@@ -33,6 +38,7 @@ app.get("/api/config", (c) => {
   });
 });
 
+app.route("/", accountRoutes);
 app.route("/", authRoutes);
 app.route("/", pasteRoutes);
 app.route("/", attachmentRoutes);
@@ -46,7 +52,10 @@ app.onError((error, c) => {
 
 export default {
   fetch: app.fetch,
+  queue(batch, env) {
+    return consumeDeletionQueue(batch, env);
+  },
   scheduled(_controller, env, context) {
     context.waitUntil(cleanupExpired(env));
   },
-} satisfies ExportedHandler<Bindings>;
+} satisfies ExportedHandler<Bindings, DeletionMessage>;

@@ -362,6 +362,21 @@ a { color: inherit; }
 .empty-card h2 { margin: 13px 0 4px; font-size: 23px; }
 .empty-card p { max-width: 500px; margin: 0 0 22px; color: var(--muted); line-height: 1.6; }
 
+.account-management {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 56px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+.account-management > div { display: grid; gap: 3px; }
+.account-management strong { color: var(--ink); font-size: 13px; }
+.account-management span { font-size: 12px; }
+.delete-account-button { color: #9d2929 !important; }
+
 .status { min-height: 60vh; display: flex; align-items: center; justify-content: center; gap: 11px; color: var(--muted); font-size: 14px; }
 .status.compact { min-height: 220px; }
 .spinner { width: 17px; height: 17px; border: 2px solid var(--line); border-top-color: var(--deep); border-radius: 50%; animation: spin .8s linear infinite; }
@@ -398,6 +413,7 @@ a { color: inherit; }
   .security-visual { min-height: 280px; }
   .header-actions .encrypted-state, .header-actions > button:nth-of-type(1) { display: none; }
   .dashboard-head { padding-top: 45px; align-items: stretch; }
+  .account-management { align-items: flex-start; flex-direction: column; }
   .create-picker, .composer-card { padding: 19px !important; }
   .create-picker-heading { align-items: flex-end; }
   .create-choice-grid { grid-template-columns: 1fr; }

@@ -46,6 +46,33 @@
       "dataset": "pastekey_events"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "DELETION_QUEUE",
+        "queue": "pastekey-deletions"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "pastekey-deletions",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "retry_delay": 60,
+        "max_concurrency": 2,
+        "dead_letter_queue": "pastekey-deletions-dlq"
+      }
+    ]
+  },
+  "workflows": [
+    {
+      "binding": "ACCOUNT_DELETION",
+      "name": "pastekey-account-deletion",
+      "class_name": "AccountDeletionWorkflow",
+      "limits": { "steps": 1024 }
+    }
+  ],
   "ratelimits": [
     {
       "name": "AUTH_RATE_LIMITER",

@@ -145,7 +145,10 @@ authRoutes.post("/api/auth/login/verify", async (c) => {
   const body = await readJson<{ credential: AuthenticationResponseJSON }>(c);
   if (!body?.credential?.id) return c.json({ error: "Invalid sign-in response" }, 400);
 
-  const stored = await c.env.DB.prepare("SELECT * FROM credentials WHERE id = ?")
+  const stored = await c.env.DB.prepare(
+    `SELECT c.* FROM credentials c JOIN users u ON u.id = c.user_id
+     WHERE c.id = ? AND u.deletion_requested_at IS NULL`,
+  )
     .bind(body.credential.id)
     .first<CredentialRow>();
   if (!stored) return c.json({ error: "Unknown passkey" }, 401);

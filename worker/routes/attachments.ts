@@ -6,6 +6,7 @@ import {
   readAttachmentHeaders,
   streamR2Object,
 } from "../repositories/attachments";
+import { enqueuePendingDeletions, stageDeletion } from "../services/deletions";
 import { requireUser } from "../services/sessions";
 import type { AppEnv } from "../types";
 
@@ -47,10 +48,12 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
       .bind(pasteId)
       .first<{ count: number }>(),
     c.env.DB.prepare(
-      `SELECT COALESCE(SUM(a.ciphertext_size), 0) AS bytes FROM attachments a
-       JOIN pastes p ON p.id = a.paste_id WHERE p.owner_id = ?`,
+      `SELECT
+        COALESCE((SELECT SUM(a.ciphertext_size) FROM attachments a
+          JOIN pastes p ON p.id = a.paste_id WHERE p.owner_id = ?), 0) +
+        COALESCE((SELECT SUM(d.ciphertext_size) FROM deletion_jobs d WHERE d.owner_id = ?), 0) AS bytes`,
     )
-      .bind(userId)
+      .bind(userId, userId)
       .first<{ bytes: number }>(),
   ]);
   if ((fileCount?.count ?? 0) >= limits.maxFilesPerPaste) {
@@ -107,17 +110,24 @@ attachmentRoutes.get("/api/pastes/:pasteId/files/:fileId/content", requireUser, 
 });
 
 attachmentRoutes.delete("/api/pastes/:pasteId/files/:fileId", requireUser, async (c) => {
+  const pasteId = c.req.param("pasteId");
+  const fileId = c.req.param("fileId");
+  const ownerId = c.get("userId");
   const attachment = await c.env.DB.prepare(
-    `SELECT a.object_key AS objectKey FROM attachments a JOIN pastes p ON p.id = a.paste_id
+    `SELECT a.id, a.object_key AS objectKey, a.ciphertext_size AS ciphertextSize
+     FROM attachments a JOIN pastes p ON p.id = a.paste_id
      WHERE a.id = ? AND p.id = ? AND p.owner_id = ?`,
   )
-    .bind(c.req.param("fileId"), c.req.param("pasteId"), c.get("userId"))
-    .first<{ objectKey: string }>();
+    .bind(fileId, pasteId, ownerId)
+    .first<{ id: string; objectKey: string; ciphertextSize: number }>();
   if (!attachment) return c.json({ error: "Attachment not found" }, 404);
 
-  await c.env.FILES.delete(attachment.objectKey);
-  await c.env.DB.prepare("DELETE FROM attachments WHERE id = ? AND paste_id = ?")
-    .bind(c.req.param("fileId"), c.req.param("pasteId"))
-    .run();
+  await c.env.DB.batch([
+    stageDeletion(c.env.DB, { ...attachment, ownerId }),
+    c.env.DB.prepare("DELETE FROM attachments WHERE id = ? AND paste_id = ?").bind(fileId, pasteId),
+  ]);
+  c.executionCtx.waitUntil(
+    enqueuePendingDeletions(c.env).catch(() => console.error("Could not dispatch pending ciphertext deletions")),
+  );
   return c.body(null, 204);
 });

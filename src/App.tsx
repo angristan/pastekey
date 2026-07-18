@@ -58,6 +58,11 @@ function VaultApp() {
     setMe({ authenticated: false });
   }
 
+  function accountDeleted() {
+    setAccountKey(null);
+    setMe({ authenticated: false });
+  }
+
   if (!me || !config) return <CenteredStatus label="Opening Pastekey…" />;
 
   if (!me.authenticated) {
@@ -83,7 +88,16 @@ function VaultApp() {
     );
   }
 
-  return <Dashboard accountKey={accountKey} config={config} me={me} onLogout={logout} onRefreshMe={refreshMe} />;
+  return (
+    <Dashboard
+      accountKey={accountKey}
+      config={config}
+      me={me}
+      onAccountDeleted={accountDeleted}
+      onLogout={logout}
+      onRefreshMe={refreshMe}
+    />
+  );
 }
 
 function shareIdFromPath() {
