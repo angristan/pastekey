@@ -108,6 +108,25 @@ export async function finalizeAttachment(db: D1Database, attachment: AttachmentI
   return results[0]!;
 }
 
+export async function findFinalizedAttachment(db: D1Database, attachment: AttachmentInsert) {
+  return db.prepare(
+    `SELECT created_at AS createdAt FROM attachments
+     WHERE id = ? AND paste_id = ? AND object_key = ? AND ciphertext_size = ?
+       AND content_iv = ? AND wrapped_key = ? AND wrapped_key_iv = ?
+       AND metadata_ciphertext = ? AND metadata_iv = ?`,
+  ).bind(
+    attachment.id,
+    attachment.pasteId,
+    attachment.objectKey,
+    attachment.ciphertextSize,
+    attachment.contentIv,
+    attachment.wrappedKey,
+    attachment.wrappedKeyIv,
+    attachment.metadataCiphertext,
+    attachment.metadataIv,
+  ).first<{ createdAt: number }>();
+}
+
 export async function stageReservationDeletion(db: D1Database, id: string, now = Date.now()) {
   return db.batch([
     db.prepare(

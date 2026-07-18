@@ -2,6 +2,7 @@ import type { AttachmentHeaders } from "../lib/attachments-http";
 import { serviceUnavailable, throwUniqueConflict } from "../lib/errors";
 import {
   finalizeAttachment,
+  findFinalizedAttachment,
   reserveAttachment,
   stageReservationDeletion,
 } from "../repositories/attachments";
@@ -55,19 +56,23 @@ export async function uploadAttachment(
   }
 
   const now = Date.now();
+  const attachment = {
+    ...reservation,
+    contentIv: input.headers.contentIv,
+    wrappedKey: input.headers.wrappedKey,
+    wrappedKeyIv: input.headers.wrappedKeyIv,
+    metadataCiphertext: input.headers.metadataCiphertext,
+    metadataIv: input.headers.metadataIv,
+    createdAt: now,
+  };
   let finalized: D1Result;
   try {
-    finalized = await finalizeAttachment(env.DB, {
-      ...reservation,
-      contentIv: input.headers.contentIv,
-      wrappedKey: input.headers.wrappedKey,
-      wrappedKeyIv: input.headers.wrappedKeyIv,
-      metadataCiphertext: input.headers.metadataCiphertext,
-      metadataIv: input.headers.metadataIv,
-      createdAt: now,
-    });
+    finalized = await finalizeAttachment(env.DB, attachment);
   } catch (cause) {
-    await cleanupRejectedUpload(env, input.fileId, input.objectKey, defer);
+    // A lost D1 response can hide a committed row. An exact recheck recovers
+    // that commit; otherwise the durable reservation lifecycle owns cleanup.
+    const recovered = await findFinalizedAttachment(env.DB, attachment).catch(() => null);
+    if (recovered) return { status: "created", createdAt: recovered.createdAt };
     throwUniqueConflict(cause, "Attachment could not be saved");
   }
   if (!finalized.meta.changes) {
