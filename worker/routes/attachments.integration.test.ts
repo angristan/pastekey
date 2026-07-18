@@ -3,7 +3,7 @@ import { createExecutionContext, createMessageBatch, getQueueResult, SELF } from
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { hashToken } from "../lib/encoding";
-import { insertAttachment } from "../repositories/attachments";
+import { finalizeAttachment, reserveAttachment } from "../repositories/attachments";
 import { consumeDeletionQueue } from "../services/deletions";
 import type { Bindings, DeletionMessage } from "../types";
 
@@ -31,6 +31,7 @@ describe("authenticated attachment routes", () => {
 
   afterEach(async () => {
     await bindings.FILES.delete(objectKey);
+    await bindings.DB.prepare("DELETE FROM upload_reservations WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
   });
@@ -61,18 +62,19 @@ describe("authenticated attachment routes", () => {
   });
 
   it("rejects finalization after account deletion begins", async () => {
+    const reservation = { id: fileId, pasteId, ownerId: userId, objectKey, ciphertextSize: 32 };
+    expect((await reserveAttachment(bindings.DB, reservation, {
+      maxFilesPerPaste: 10,
+      maxStorageBytes: 1024,
+    })).meta.changes).toBe(1);
     await bindings.DB.prepare(
       "UPDATE users SET deletion_requested_at = ?, deletion_workflow_id = ? WHERE id = ?",
     )
       .bind(Date.now(), "account-test-workflow", userId)
       .run();
 
-    const result = await insertAttachment(bindings.DB, {
-      id: fileId,
-      pasteId,
-      ownerId: userId,
-      objectKey,
-      ciphertextSize: 32,
+    const result = await finalizeAttachment(bindings.DB, {
+      ...reservation,
       contentIv: "AA",
       wrappedKey: "AA",
       wrappedKeyIv: "AA",
@@ -83,6 +85,32 @@ describe("authenticated attachment routes", () => {
 
     expect(result.meta.changes).toBe(0);
     expect(await bindings.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first()).toBeNull();
+  });
+
+  it("serializes concurrent file and storage quota reservations", async () => {
+    const reservations = Array.from({ length: 3 }, (_, index) => ({
+      id: `quota-file-000000000${index}`,
+      pasteId,
+      ownerId: userId,
+      objectKey: `${userId}/${pasteId}/quota-${index}`,
+      ciphertextSize: 32,
+    }));
+    const fileResults = await Promise.all(
+      reservations.map((reservation) => reserveAttachment(bindings.DB, reservation, {
+        maxFilesPerPaste: 2,
+        maxStorageBytes: 1024,
+      })),
+    );
+    expect(fileResults.reduce((sum, result) => sum + result.meta.changes, 0)).toBe(2);
+
+    await bindings.DB.prepare("DELETE FROM upload_reservations WHERE owner_id = ?").bind(userId).run();
+    const storageResults = await Promise.all(
+      reservations.map((reservation) => reserveAttachment(bindings.DB, reservation, {
+        maxFilesPerPaste: 10,
+        maxStorageBytes: 64,
+      })),
+    );
+    expect(storageResults.reduce((sum, result) => sum + result.meta.changes, 0)).toBe(2);
   });
 
   it("queues individual file deletion without leaving metadata", async () => {

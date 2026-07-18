@@ -12,7 +12,7 @@ const STEP_CONFIG = {
 type DeletionTarget = {
   id: string;
   objectKey: string;
-  source: "attachment" | "job";
+  source: "attachment" | "job" | "reservation";
 };
 
 export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, AccountDeletionPayload> {
@@ -74,9 +74,12 @@ async function deleteCiphertextBatch(env: Bindings, userId: string, workflowId: 
       UNION ALL
       SELECT d.id, d.object_key AS objectKey, 'job' AS source
       FROM deletion_jobs d WHERE d.owner_id = ?
+      UNION ALL
+      SELECT r.id, r.object_key AS objectKey, 'reservation' AS source
+      FROM upload_reservations r WHERE r.owner_id = ? AND r.expires_at <= ?
     ) ORDER BY id LIMIT ?`,
   )
-    .bind(userId, userId, OBJECTS_PER_STEP)
+    .bind(userId, userId, userId, Date.now(), OBJECTS_PER_STEP)
     .all<DeletionTarget>();
   if (!rows.results.length) return 0;
 
@@ -85,6 +88,7 @@ async function deleteCiphertextBatch(env: Bindings, userId: string, workflowId: 
 
   const attachmentIds = rows.results.filter(({ source }) => source === "attachment").map(({ id }) => id);
   const jobIds = rows.results.filter(({ source }) => source === "job").map(({ id }) => id);
+  const reservationIds = rows.results.filter(({ source }) => source === "reservation").map(({ id }) => id);
   const statements: D1PreparedStatement[] = [];
   if (attachmentIds.length) {
     statements.push(
@@ -94,6 +98,12 @@ async function deleteCiphertextBatch(env: Bindings, userId: string, workflowId: 
   if (jobIds.length) {
     statements.push(
       env.DB.prepare(`DELETE FROM deletion_jobs WHERE id IN (${placeholders(jobIds)})`).bind(...jobIds),
+    );
+  }
+  if (reservationIds.length) {
+    statements.push(
+      env.DB.prepare(`DELETE FROM upload_reservations WHERE id IN (${placeholders(reservationIds)})`)
+        .bind(...reservationIds),
     );
   }
   await env.DB.batch(statements);
@@ -113,9 +123,10 @@ async function countDeletionTargets(db: D1Database, userId: string) {
   const row = await db.prepare(
     `SELECT
       (SELECT COUNT(*) FROM attachments a JOIN pastes p ON p.id = a.paste_id WHERE p.owner_id = ?) +
-      (SELECT COUNT(*) FROM deletion_jobs d WHERE d.owner_id = ?) AS count`,
+      (SELECT COUNT(*) FROM deletion_jobs d WHERE d.owner_id = ?) +
+      (SELECT COUNT(*) FROM upload_reservations r WHERE r.owner_id = ?) AS count`,
   )
-    .bind(userId, userId)
+    .bind(userId, userId, userId)
     .first<{ count: number }>();
   return row?.count ?? 0;
 }

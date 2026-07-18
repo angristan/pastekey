@@ -15,8 +15,36 @@ const objectKey = `${userId}/${pasteId}/${fileId}`;
 describe("expired ciphertext cleanup", () => {
   afterEach(async () => {
     await bindings.FILES.delete(objectKey);
+    await bindings.DB.prepare("DELETE FROM upload_reservations WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("moves abandoned upload reservations through the durable deletion queue", async () => {
+    const now = Date.now();
+    await bindings.DB.prepare(
+      `INSERT INTO upload_reservations (
+        id, owner_id, paste_id, object_key, ciphertext_size, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(fileId, userId, pasteId, objectKey, 32, now - 10_000, now - 1)
+      .run();
+    await bindings.FILES.put(objectKey, new Uint8Array(32));
+
+    await cleanupExpired(bindings);
+
+    expect(await bindings.DB.prepare("SELECT id FROM upload_reservations WHERE id = ?").bind(fileId).first()).toBeNull();
+    expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(fileId).first()).not.toBeNull();
+
+    const batch = createMessageBatch<DeletionMessage>("pastekey-deletions", [
+      { id: "reservation-message", timestamp: new Date(), attempts: 1, body: { jobId: fileId } },
+    ]);
+    const context = createExecutionContext();
+    await consumeDeletionQueue(batch, bindings);
+    const result = await getQueueResult(batch, context);
+
+    expect(result.explicitAcks).toContain("reservation-message");
+    expect(await bindings.FILES.get(objectKey)).toBeNull();
   });
 
   it("moves expired files through the durable deletion queue", async () => {

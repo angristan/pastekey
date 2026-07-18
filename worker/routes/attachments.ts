@@ -2,9 +2,11 @@ import { Hono } from "hono";
 
 import { OPAQUE_ID, serviceLimits } from "../lib/config";
 import {
-  insertAttachment,
+  finalizeAttachment,
   listAttachments,
   readAttachmentHeaders,
+  reserveAttachment,
+  stageReservationDeletion,
   streamR2Object,
 } from "../repositories/attachments";
 import { enqueuePendingDeletions, stageDeletion } from "../services/deletions";
@@ -36,56 +38,58 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
   const fields = readAttachmentHeaders(c.req.raw.headers);
   if (!fields) return c.json({ error: "Invalid encrypted attachment metadata" }, 400);
 
-  const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
-    .bind(pasteId, userId)
-    .first();
-  if (!paste) return c.json({ error: "Item not found" }, 404);
-
-  const objectKey = `${userId}/${pasteId}/${fileId}`;
-  const existing = await c.env.DB.prepare(
-    `SELECT id FROM attachments WHERE id = ?
-     UNION ALL
-     SELECT id FROM deletion_jobs WHERE id = ? OR object_key = ?
-     LIMIT 1`,
-  )
-    .bind(fileId, fileId, objectKey)
-    .first();
-  if (existing) return c.json({ error: "Attachment ID is already reserved" }, 409);
-
-  const [fileCount, storage] = await Promise.all([
-    c.env.DB.prepare("SELECT COUNT(*) AS count FROM attachments WHERE paste_id = ?")
-      .bind(pasteId)
-      .first<{ count: number }>(),
-    c.env.DB.prepare(
-      `SELECT
-        COALESCE((SELECT SUM(a.ciphertext_size) FROM attachments a
-          JOIN pastes p ON p.id = a.paste_id WHERE p.owner_id = ?), 0) +
-        COALESCE((SELECT SUM(d.ciphertext_size) FROM deletion_jobs d WHERE d.owner_id = ?), 0) AS bytes`,
-    )
-      .bind(userId, userId)
-      .first<{ bytes: number }>(),
-  ]);
-  if ((fileCount?.count ?? 0) >= limits.maxFilesPerPaste) {
-    return c.json({ error: "File limit reached for this item" }, 413);
-  }
-  if ((storage?.bytes ?? 0) + length > limits.maxStorageBytes) {
-    return c.json({ error: "Account storage quota exceeded" }, 413);
-  }
   if (!c.req.raw.body) return c.json({ error: "Encrypted file body is required" }, 400);
 
-  await c.env.FILES.put(objectKey, c.req.raw.body, {
-    httpMetadata: { contentType: "application/octet-stream" },
-  });
+  const objectKey = `${userId}/${pasteId}/${fileId}`;
+  const reservation = { id: fileId, pasteId, ownerId: userId, objectKey, ciphertextSize: length };
+  let reserved: D1Result;
+  try {
+    reserved = await reserveAttachment(c.env.DB, reservation, limits);
+  } catch {
+    return c.json({ error: "Attachment ID is already reserved" }, 409);
+  }
+  if (!reserved.meta.changes) {
+    const [paste, identity, fileCount] = await Promise.all([
+      c.env.DB.prepare(
+        `SELECT p.id FROM pastes p JOIN users u ON u.id = p.owner_id
+         WHERE p.id = ? AND p.owner_id = ? AND u.deletion_requested_at IS NULL
+           AND (p.expires_at IS NULL OR p.expires_at > ?)`,
+      ).bind(pasteId, userId, Date.now()).first(),
+      c.env.DB.prepare(
+        `SELECT id FROM attachments WHERE id = ? OR object_key = ?
+         UNION ALL SELECT id FROM deletion_jobs WHERE id = ? OR object_key = ?
+         UNION ALL SELECT id FROM upload_reservations WHERE id = ? OR object_key = ?
+         LIMIT 1`,
+      ).bind(fileId, objectKey, fileId, objectKey, fileId, objectKey).first(),
+      c.env.DB.prepare(
+        `SELECT
+          (SELECT COUNT(*) FROM attachments WHERE paste_id = ?) +
+          (SELECT COUNT(*) FROM upload_reservations WHERE paste_id = ?) AS count`,
+      ).bind(pasteId, pasteId).first<{ count: number }>(),
+    ]);
+    if (!paste) return c.json({ error: "Item not found" }, 404);
+    if (identity) return c.json({ error: "Attachment ID is already reserved" }, 409);
+    if ((fileCount?.count ?? 0) >= limits.maxFilesPerPaste) {
+      return c.json({ error: "File limit reached for this item" }, 413);
+    }
+    return c.json({ error: "Account storage quota exceeded" }, 413);
+  }
+
+  try {
+    await c.env.FILES.put(objectKey, c.req.raw.body, {
+      httpMetadata: { contentType: "application/octet-stream" },
+    });
+  } catch {
+    await stageReservationDeletion(c.env.DB, fileId);
+    c.executionCtx.waitUntil(enqueuePendingDeletions(c.env));
+    return c.json({ error: "Encrypted attachment upload failed" }, 503);
+  }
 
   const now = Date.now();
-  let inserted: D1Result;
+  let finalized: D1Result;
   try {
-    inserted = await insertAttachment(c.env.DB, {
-      id: fileId,
-      pasteId,
-      ownerId: userId,
-      objectKey,
-      ciphertextSize: length,
+    finalized = await finalizeAttachment(c.env.DB, {
+      ...reservation,
       contentIv: fields.contentIv,
       wrappedKey: fields.wrappedKey,
       wrappedKeyIv: fields.wrappedKeyIv,
@@ -94,11 +98,13 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
       createdAt: now,
     });
   } catch {
-    await c.env.FILES.delete(objectKey);
+    await stageReservationDeletion(c.env.DB, fileId);
+    c.executionCtx.waitUntil(enqueuePendingDeletions(c.env));
     return c.json({ error: "Attachment could not be saved" }, 409);
   }
-  if (!inserted.meta.changes) {
-    await c.env.FILES.delete(objectKey);
+  if (!finalized.meta.changes) {
+    await stageReservationDeletion(c.env.DB, fileId);
+    c.executionCtx.waitUntil(enqueuePendingDeletions(c.env));
     return c.json({ error: "Item is no longer available" }, 409);
   }
 

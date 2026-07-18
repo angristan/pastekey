@@ -33,24 +33,22 @@ pasteRoutes.post("/api/pastes", requireUser, async (c) => {
   const body = await readJson<PasteWrite>(c);
   if (!validPasteWrite(body)) return c.json({ error: "Invalid encrypted item" }, 400);
 
-  const count = await c.env.DB.prepare("SELECT COUNT(*) AS count FROM pastes WHERE owner_id = ?")
-    .bind(c.get("userId"))
-    .first<{ count: number }>();
-  if ((count?.count ?? 0) >= serviceLimits(c.env).maxPastesPerUser) {
-    return c.json({ error: "Item quota reached. Delete an item before creating another." }, 413);
-  }
-
   const now = Date.now();
+  const userId = c.get("userId");
+  let inserted: D1Result;
   try {
-    await c.env.DB.prepare(
+    inserted = await c.env.DB.prepare(
       `INSERT INTO pastes (
         id, owner_id, ciphertext, content_iv, wrapped_key, wrapped_key_iv,
         created_at, updated_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      SELECT ?, u.id, ?, ?, ?, ?, ?, ?, ?
+      FROM users u
+      WHERE u.id = ? AND u.deletion_requested_at IS NULL
+        AND (SELECT COUNT(*) FROM pastes WHERE owner_id = u.id) < ?`,
     )
       .bind(
         body.id,
-        c.get("userId"),
         body.ciphertext,
         body.contentIv,
         body.wrappedKey,
@@ -58,10 +56,19 @@ pasteRoutes.post("/api/pastes", requireUser, async (c) => {
         now,
         now,
         normalizeExpiry(body.expiresAt),
+        userId,
+        serviceLimits(c.env).maxPastesPerUser,
       )
       .run();
   } catch {
     return c.json({ error: "Item ID already exists" }, 409);
+  }
+  if (!inserted.meta.changes) {
+    const active = await c.env.DB.prepare(
+      "SELECT id FROM users WHERE id = ? AND deletion_requested_at IS NULL",
+    ).bind(userId).first();
+    if (!active) return c.json({ error: "Account is unavailable" }, 409);
+    return c.json({ error: "Item quota reached. Delete an item before creating another." }, 413);
   }
   return c.json({ id: body.id, createdAt: now }, 201);
 });

@@ -96,7 +96,7 @@ bun run db:migrate:remote
 bun run deploy
 ```
 
-The Turnstile site key is a public `vars` value; its secret must only be stored with `wrangler secret put`. Default quotas are 100 encrypted items, 10 files per item, 25 MiB per file, and 100 MiB of files per account.
+The Turnstile site key is a public `vars` value; its secret must only be stored with `wrangler secret put`. Default quotas are 100 encrypted items, 10 files per item, 25 MiB per file, and 100 MiB of files per account. D1 upload reservations enforce file-count and storage limits before ciphertext reaches R2.
 
 This repository is configured for `paste.stanislas.cloud`; forks must use their own D1 database and domain. Once passkeys exist for an RP ID, changing it requires registering new credentials.
 

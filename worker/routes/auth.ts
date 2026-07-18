@@ -223,16 +223,25 @@ authRoutes.post("/api/auth/logout", async (c) => {
 
 authRoutes.delete("/api/auth/passkeys/:id", requireUser, async (c) => {
   const userId = c.get("userId");
-  const count = await c.env.DB.prepare("SELECT COUNT(*) AS count FROM credentials WHERE user_id = ?")
-    .bind(userId)
-    .first<{ count: number }>();
-  if (!count || count.count <= 1) return c.json({ error: "Keep at least one passkey" }, 409);
-
-  const result = await c.env.DB.prepare("DELETE FROM credentials WHERE id = ? AND user_id = ?")
-    .bind(c.req.param("id"), userId)
+  const credentialId = c.req.param("id");
+  const result = await c.env.DB.prepare(
+    `DELETE FROM credentials
+     WHERE id = ? AND user_id = ?
+       AND EXISTS (
+         SELECT 1 FROM credentials remaining
+         WHERE remaining.user_id = credentials.user_id
+           AND remaining.id <> credentials.id
+       )`,
+  )
+    .bind(credentialId, userId)
     .run();
-  if (!result.meta.changes) return c.json({ error: "Passkey not found" }, 404);
-  return c.body(null, 204);
+  if (result.meta.changes) return c.body(null, 204);
+
+  const exists = await c.env.DB.prepare("SELECT id FROM credentials WHERE id = ? AND user_id = ?")
+    .bind(credentialId, userId)
+    .first();
+  if (!exists) return c.json({ error: "Passkey not found" }, 404);
+  return c.json({ error: "Keep at least one passkey" }, 409);
 });
 
 async function beginRegistration(
