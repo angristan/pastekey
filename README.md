@@ -1,6 +1,6 @@
 # Pastekey
 
-A passkey-native, end-to-end encrypted pastebin built on Cloudflare Workers, D1, React, and Kumo.
+Passkey-native, end-to-end encrypted text and file sharing built on Cloudflare Workers, D1, React, and Kumo.
 
 ## Security model
 
@@ -13,16 +13,16 @@ Passkey PRF ──HKDF──> passkey wrapping key
                    account key
                          │ unwraps
                          ▼
-                 per-paste random key ──AES-GCM──> paste
+                  per-item random key ──AES-GCM──> paste or file item
                          │
-                         ├── wraps independent attachment keys ──AES-GCM──> R2 ciphertext
+                         ├── wraps independent file keys ──AES-GCM──> R2 ciphertext
                          └── wrapped by a share key from the URL #fragment
 ```
 
-- Every paste gets an independent random AES-256-GCM key.
+- Every paste or standalone file item gets an independent random AES-256-GCM key.
 - The account key is wrapped independently for each passkey using WebAuthn PRF output.
-- The title, format, and content are encrypted together.
-- Every attachment has an independent key; filename, MIME type, and bytes are encrypted locally before R2 upload.
+- Item type, title, format, and text content are encrypted together; legacy pastes remain compatible.
+- Every file has an independent key; filename, MIME type, and bytes are encrypted locally before R2 upload.
 - Share links contain a random secret after `#`; URL fragments are not sent to the server.
 - Revoking a share deletes its wrapped paste-key envelope. It cannot revoke plaintext already copied by a recipient.
 - D1 and R2 still expose metadata: account/paste/file counts, timestamps, ciphertext sizes, expiry, and access metadata.
@@ -48,7 +48,7 @@ src/
 ├── features/
 │   ├── auth/            # Landing, locked state, Turnstile
 │   ├── pastes/          # Dashboard, composer, paste management
-│   └── sharing/         # Public shared-paste experience
+│   └── sharing/         # Public shared paste and file experience
 └── lib/                 # Stable API surface, API client, downloads, formatting, protocol types
 
 worker/
@@ -86,7 +86,7 @@ bun run db:migrate:remote
 bun run deploy
 ```
 
-The Turnstile site key is a public `vars` value; its secret must only be stored with `wrangler secret put`. Default quotas are 100 pastes, 10 files per paste, 25 MiB per file, and 100 MiB of attachments per account.
+The Turnstile site key is a public `vars` value; its secret must only be stored with `wrangler secret put`. Default quotas are 100 encrypted items, 10 files per item, 25 MiB per file, and 100 MiB of files per account.
 
 This repository is configured for `paste.stanislas.cloud`; forks must use their own D1 database and domain. Once passkeys exist for an RP ID, changing it requires registering new credentials.
 

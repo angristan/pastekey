@@ -41,9 +41,9 @@ export function Landing({
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">No passwords. No plaintext.</p>
-          <h1>Paste something.<br />Keep the key.</h1>
+          <h1>Paste or upload.<br />Keep the key.</h1>
           <p className="hero-description">
-            An end-to-end encrypted pastebin unlocked by your passkey. Cloudflare stores ciphertext—not your words.
+            End-to-end encrypted text and file sharing, unlocked by your passkey. Cloudflare stores ciphertext—not your content.
           </p>
           {config.turnstileSiteKey && (
             <Turnstile key={challengeVersion} siteKey={config.turnstileSiteKey} onToken={setTurnstileToken} />

@@ -16,7 +16,7 @@ attachmentRoutes.get("/api/pastes/:id/files", requireUser, async (c) => {
   const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
     .bind(pasteId, c.get("userId"))
     .first();
-  if (!paste) return c.json({ error: "Paste not found" }, 404);
+  if (!paste) return c.json({ error: "Item not found" }, 404);
   return c.json({ attachments: await listAttachments(c.env.DB, pasteId) });
 });
 
@@ -37,7 +37,7 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
   const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
     .bind(pasteId, userId)
     .first();
-  if (!paste) return c.json({ error: "Paste not found" }, 404);
+  if (!paste) return c.json({ error: "Item not found" }, 404);
 
   const existing = await c.env.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first();
   if (existing) return c.json({ error: "Attachment ID already exists" }, 409);
@@ -54,7 +54,7 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
       .first<{ bytes: number }>(),
   ]);
   if ((fileCount?.count ?? 0) >= limits.maxFilesPerPaste) {
-    return c.json({ error: "Attachment limit reached for this paste" }, 413);
+    return c.json({ error: "File limit reached for this item" }, 413);
   }
   if ((storage?.bytes ?? 0) + length > limits.maxStorageBytes) {
     return c.json({ error: "Account storage quota exceeded" }, 413);

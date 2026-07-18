@@ -5,15 +5,17 @@ import { useState, type FormEvent } from "react";
 import { api, jsonBody } from "../../lib/api";
 import { encryptAttachment, encryptNewPaste } from "../../lib/crypto";
 import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
-import type { AppConfig } from "../../lib/types";
+import type { AppConfig, ItemKind } from "../../lib/types";
 
 export function PasteComposer({
   accountKey,
+  kind,
   limits,
   onCreated,
   onCancel,
 }: {
   accountKey: CryptoKey;
+  kind: ItemKind;
   limits: AppConfig["limits"];
   onCreated: () => Promise<void>;
   onCancel: () => void;
@@ -29,15 +31,24 @@ export function PasteComposer({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!content.trim() && files.length === 0) return setError("Add paste content or at least one file.");
+    if (kind === "paste" && !content.trim()) return setError("Add some paste content.");
+    if (kind === "files" && files.length === 0) return setError("Choose at least one file.");
     setSaving(true);
     setError(null);
     let createdPasteId: string | null = null;
     try {
-      setProgress("Encrypting paste…");
+      setProgress(kind === "files" ? "Encrypting file item…" : "Encrypting paste…");
+      const fallbackTitle = kind === "files"
+        ? (files.length === 1 ? files[0]!.name : `${files.length} encrypted files`)
+        : "Untitled paste";
       const encrypted = await encryptNewPaste(
         accountKey,
-        { title: title.trim() || "Untitled paste", content, language },
+        {
+          kind,
+          title: (title.trim() || fallbackTitle).slice(0, 120),
+          content: kind === "paste" ? content : "",
+          language: kind === "paste" ? language : "files",
+        },
         expiryTimestamp(expiry),
       );
       await api("/api/pastes", { method: "POST", ...jsonBody(encrypted.write) });
@@ -72,22 +83,32 @@ export function PasteComposer({
       <form onSubmit={submit}>
         <div className="composer-heading">
           <div>
-            <h2>New encrypted paste</h2>
-            <p>The title and content are encrypted together.</p>
+            <h2>{kind === "files" ? "Upload encrypted files" : "New encrypted paste"}</h2>
+            <p>{kind === "files"
+              ? "File names, types, and contents are encrypted locally."
+              : "The title and content are encrypted together."}</p>
           </div>
           <Badge>Local encryption</Badge>
         </div>
         {error && <Banner variant="error" description={error} />}
-        <div className="composer-grid">
-          <Input label="Title" placeholder="Deploy notes" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} />
-          <Select<string> label="Format" value={language} onValueChange={(value) => value && setLanguage(value)}>
-            <Select.Option value="text">Plain text</Select.Option>
-            <Select.Option value="javascript">JavaScript</Select.Option>
-            <Select.Option value="typescript">TypeScript</Select.Option>
-            <Select.Option value="json">JSON</Select.Option>
-            <Select.Option value="shell">Shell</Select.Option>
-            <Select.Option value="markdown">Markdown</Select.Option>
-          </Select>
+        <div className={`composer-grid${kind === "files" ? " file-composer-grid" : ""}`}>
+          <Input
+            label="Title"
+            placeholder={kind === "files" ? "Design assets (optional)" : "Deploy notes"}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            maxLength={120}
+          />
+          {kind === "paste" && (
+            <Select<string> label="Format" value={language} onValueChange={(value) => value && setLanguage(value)}>
+              <Select.Option value="text">Plain text</Select.Option>
+              <Select.Option value="javascript">JavaScript</Select.Option>
+              <Select.Option value="typescript">TypeScript</Select.Option>
+              <Select.Option value="json">JSON</Select.Option>
+              <Select.Option value="shell">Shell</Select.Option>
+              <Select.Option value="markdown">Markdown</Select.Option>
+            </Select>
+          )}
           <Select<Expiry> label="Expires" value={expiry} onValueChange={(value) => value && setExpiry(value)}>
             <Select.Option value="hour">1 hour</Select.Option>
             <Select.Option value="day">1 day</Select.Option>
@@ -95,19 +116,21 @@ export function PasteComposer({
             <Select.Option value="never">Never</Select.Option>
           </Select>
         </div>
-        <Textarea
-          label="Paste"
-          placeholder="Paste text or code here…"
-          value={content}
-          onChange={(event) => setContent(event.target.value)}
-          rows={12}
-          spellCheck={false}
-          maxLength={500_000}
-        />
+        {kind === "paste" && (
+          <Textarea
+            label="Paste"
+            placeholder="Paste text or code here…"
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            rows={12}
+            spellCheck={false}
+            maxLength={500_000}
+          />
+        )}
         <div className="file-picker">
           <label className="file-picker-button">
             <PaperclipIcon />
-            Add encrypted files
+            {kind === "files" ? "Choose files" : "Add encrypted files"}
             <input
               type="file"
               multiple
@@ -141,10 +164,12 @@ export function PasteComposer({
           </div>
         )}
         <div className="composer-actions">
-          <span><LockKeyIcon /> Encrypted with a new per-paste key</span>
+          <span><LockKeyIcon /> Encrypted with a new per-item key</span>
           <div>
             <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
-            <Button type="submit" variant="primary" loading={saving}>{progress ?? "Encrypt & save"}</Button>
+            <Button type="submit" variant="primary" loading={saving}>
+              {progress ?? (kind === "files" ? "Encrypt & upload" : "Encrypt & save")}
+            </Button>
           </div>
         </div>
       </form>

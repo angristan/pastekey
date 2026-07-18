@@ -209,6 +209,7 @@ a { color: inherit; }
 }
 .dashboard-head h1 { margin: 0; font-size: clamp(44px, 6vw, 70px); line-height: 1; letter-spacing: -.065em; }
 .dashboard-head > div > p:last-child { margin: 12px 0 0; color: var(--muted); }
+.dashboard-create-actions, .empty-actions { display: flex; align-items: center; gap: 9px; }
 .dashboard-banner { margin-bottom: 18px; }
 
 .composer-card { margin-bottom: 24px; padding: 28px !important; }
@@ -217,6 +218,7 @@ a { color: inherit; }
 .composer-heading h2 { margin: 0; font-size: 24px; letter-spacing: -.035em; }
 .composer-heading p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .composer-grid { display: grid; grid-template-columns: minmax(220px, 1fr) 190px 160px; gap: 14px; }
+.file-composer-grid { grid-template-columns: minmax(220px, 1fr) 160px; }
 .composer-card textarea {
   min-height: 280px;
   font: 14px/1.65 var(--mono) !important;
@@ -264,7 +266,8 @@ a { color: inherit; }
 .share-row > span { color: var(--muted); font-size: 11px; }
 .attachment-list, .shared-attachments { padding: 16px 22px; display: grid; gap: 10px; border-top: 1px solid var(--line); background: #f7f5ef; }
 .attachment-list > strong, .shared-attachments > strong { font-size: 13px; }
-.attachment-list > p { margin: 0; color: var(--muted); font-size: 11px; }
+.attachment-list > p, .shared-attachments > p { margin: 0; color: var(--muted); font-size: 11px; }
+.file-item-status { padding: 18px 22px; border-top: 1px solid var(--line); color: var(--muted); background: #f7f5ef; font-size: 12px; }
 .attachment-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; }
 .attachment-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .attachment-row > small { color: var(--muted); white-space: nowrap; }
@@ -307,8 +310,11 @@ a { color: inherit; }
 @media (max-width: 860px) {
   .hero { grid-template-columns: 1fr; padding-top: 55px; }
   .security-card { max-width: 610px; transform: none; }
+  .dashboard-head { align-items: flex-start; flex-direction: column; }
   .composer-grid { grid-template-columns: 1fr 1fr; }
   .composer-grid > :first-child { grid-column: 1 / -1; }
+  .file-composer-grid { grid-template-columns: 1fr 160px; }
+  .file-composer-grid > :first-child { grid-column: auto; }
   .paste-card-head, .shared-heading, .shared-footer { align-items: flex-start; flex-direction: column; }
 }
 
@@ -319,8 +325,8 @@ a { color: inherit; }
   .hero h1 { font-size: 53px; }
   .security-visual { min-height: 280px; }
   .header-actions .encrypted-state, .header-actions > button:nth-of-type(1) { display: none; }
-  .dashboard-head { padding-top: 45px; align-items: flex-start; }
-  .dashboard-head > button { white-space: nowrap; }
+  .dashboard-head { padding-top: 45px; align-items: stretch; }
+  .dashboard-create-actions > button { flex: 1; white-space: nowrap; }
   .composer-card { padding: 19px !important; }
   .composer-grid { grid-template-columns: 1fr; }
   .composer-grid > :first-child { grid-column: auto; }

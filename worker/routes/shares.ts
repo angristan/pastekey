@@ -13,7 +13,7 @@ shareRoutes.get("/api/pastes/:id/shares", requireUser, async (c) => {
   const owned = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
     .bind(c.req.param("id"), c.get("userId"))
     .first();
-  if (!owned) return c.json({ error: "Paste not found" }, 404);
+  if (!owned) return c.json({ error: "Item not found" }, 404);
 
   const shares = await c.env.DB.prepare(
     `SELECT id, created_at AS createdAt, expires_at AS expiresAt
@@ -33,7 +33,7 @@ shareRoutes.post("/api/pastes/:id/shares", requireUser, async (c) => {
   const paste = await c.env.DB.prepare("SELECT id FROM pastes WHERE id = ? AND owner_id = ?")
     .bind(c.req.param("id"), c.get("userId"))
     .first();
-  if (!paste) return c.json({ error: "Paste not found" }, 404);
+  if (!paste) return c.json({ error: "Item not found" }, 404);
 
   const now = Date.now();
   try {

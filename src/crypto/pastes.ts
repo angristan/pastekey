@@ -133,7 +133,12 @@ async function decryptPayload(key: CryptoKey, id: string, ciphertext: string, en
     fromBase64Url(ciphertext),
   );
   const value = JSON.parse(decoder.decode(plaintext)) as Partial<PastePayload>;
-  if (typeof value.title !== "string" || typeof value.content !== "string" || typeof value.language !== "string") {
+  if (
+    typeof value.title !== "string" ||
+    typeof value.content !== "string" ||
+    typeof value.language !== "string" ||
+    (value.kind !== undefined && value.kind !== "paste" && value.kind !== "files")
+  ) {
     throw new Error("Invalid encrypted paste payload");
   }
   return value as PastePayload;

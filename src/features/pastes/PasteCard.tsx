@@ -6,14 +6,14 @@ import {
   ShareNetworkIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AttachmentList } from "../../components/AttachmentList";
 import { api } from "../../lib/api";
 import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata } from "../../lib/crypto";
 import { formatDate, formatExpiry, messageOf } from "../../lib/format";
-import type { StoredAttachment } from "../../lib/types";
+import { itemKindOf, type StoredAttachment } from "../../lib/types";
 import type { UnlockedPaste } from "./types";
 
 export function PasteCard({
@@ -29,7 +29,18 @@ export function PasteCard({
   const [shares, setShares] = useState<{ id: string; createdAt: number; expiresAt: number | null }[] | null>(null);
   const [attachments, setAttachments] = useState<UnlockedAttachment[] | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
+  const fileItem = itemKindOf(paste.payload) === "files";
   const preview = paste.payload.content.split("\n").slice(0, 4).join("\n");
+
+  useEffect(() => {
+    if (!fileItem) return;
+    let active = true;
+    setPanelError(null);
+    loadAttachments()
+      .then((items) => active && setAttachments(items))
+      .catch((cause) => active && setPanelError(messageOf(cause)));
+    return () => { active = false; };
+  }, [fileItem, paste.stored.id, paste.pasteKey]);
 
   async function toggleShares() {
     if (shares) return setShares(null);
@@ -53,16 +64,18 @@ export function PasteCard({
     }
   }
 
+  async function loadAttachments() {
+    const result = await api<{ attachments: StoredAttachment[] }>(`/api/pastes/${paste.stored.id}/files`);
+    return Promise.all(
+      result.attachments.map(async (stored) => ({ stored, ...(await decryptAttachmentMetadata(paste.pasteKey, stored)) })),
+    );
+  }
+
   async function toggleFiles() {
     if (attachments) return setAttachments(null);
     setPanelError(null);
     try {
-      const result = await api<{ attachments: StoredAttachment[] }>(`/api/pastes/${paste.stored.id}/files`);
-      setAttachments(
-        await Promise.all(
-          result.attachments.map(async (stored) => ({ stored, ...(await decryptAttachmentMetadata(paste.pasteKey, stored)) })),
-        ),
-      );
+      setAttachments(await loadAttachments());
     } catch (cause) {
       setPanelError(messageOf(cause));
     }
@@ -79,16 +92,25 @@ export function PasteCard({
         <div>
           <div className="paste-title-row">
             <h2>{paste.payload.title}</h2>
-            <Badge>{paste.payload.language}</Badge>
+            <Badge>{fileItem ? "Files" : paste.payload.language}</Badge>
           </div>
           <p>Updated {formatDate(paste.stored.updatedAt)} · {formatExpiry(paste.stored.expiresAt)}</p>
         </div>
         <div className="paste-actions">
           <Button size="sm" icon={ShareNetworkIcon} onClick={onShare}>Share</Button>
-          <Button size="sm" variant="ghost" icon={PaperclipIcon} onClick={toggleFiles}>Files</Button>
+          {!fileItem && <Button size="sm" variant="ghost" icon={PaperclipIcon} onClick={toggleFiles}>Files</Button>}
           <Button size="sm" variant="ghost" icon={KeyIcon} onClick={toggleShares}>Links</Button>
-          <Button size="sm" variant="ghost" icon={CopyIcon} onClick={() => navigator.clipboard.writeText(paste.payload.content)}>Copy</Button>
-          <Button size="sm" shape="square" variant="ghost" icon={TrashIcon} aria-label="Delete paste" onClick={onDelete} />
+          {!fileItem && (
+            <Button size="sm" variant="ghost" icon={CopyIcon} onClick={() => navigator.clipboard.writeText(paste.payload.content)}>Copy</Button>
+          )}
+          <Button
+            size="sm"
+            shape="square"
+            variant="ghost"
+            icon={TrashIcon}
+            aria-label={`Delete ${fileItem ? "file item" : "paste"}`}
+            onClick={onDelete}
+          />
         </div>
       </div>
       {panelError && <div className="share-error">{panelError}</div>}
@@ -107,19 +129,25 @@ export function PasteCard({
           ))}
         </div>
       )}
+      {fileItem && attachments === null && !panelError && (
+        <div className="file-item-status">Decrypting files…</div>
+      )}
       {attachments && (
         <AttachmentList
           attachments={attachments}
           downloadEndpoint={(attachment) => `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`}
-          emptyMessage="No files attached."
+          emptyMessage={fileItem ? "No files remain in this item." : "No files attached."}
           onDelete={removeFile}
           onError={setPanelError}
+          title={fileItem ? "Encrypted files" : "Encrypted attachments"}
         />
       )}
-      <button className="paste-preview" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
-        <pre>{expanded ? paste.payload.content : preview}</pre>
-        {!expanded && paste.payload.content.split("\n").length > 4 && <span>Show all</span>}
-      </button>
+      {!fileItem && (
+        <button className="paste-preview" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+          <pre>{expanded ? paste.payload.content : preview}</pre>
+          {!expanded && paste.payload.content.split("\n").length > 4 && <span>Show all</span>}
+        </button>
+      )}
     </LayerCard>
   );
 }

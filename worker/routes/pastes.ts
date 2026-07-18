@@ -24,19 +24,19 @@ pasteRoutes.get("/api/pastes", requireUser, async (c) => {
 
 pasteRoutes.get("/api/pastes/:id", requireUser, async (c) => {
   const paste = await getOwnedPaste(c, c.req.param("id")!);
-  if (!paste) return c.json({ error: "Paste not found" }, 404);
+  if (!paste) return c.json({ error: "Item not found" }, 404);
   return c.json(paste);
 });
 
 pasteRoutes.post("/api/pastes", requireUser, async (c) => {
   const body = await readJson<PasteWrite>(c);
-  if (!validPasteWrite(body)) return c.json({ error: "Invalid encrypted paste" }, 400);
+  if (!validPasteWrite(body)) return c.json({ error: "Invalid encrypted item" }, 400);
 
   const count = await c.env.DB.prepare("SELECT COUNT(*) AS count FROM pastes WHERE owner_id = ?")
     .bind(c.get("userId"))
     .first<{ count: number }>();
   if ((count?.count ?? 0) >= serviceLimits(c.env).maxPastesPerUser) {
-    return c.json({ error: "Paste quota reached. Delete a paste before creating another." }, 413);
+    return c.json({ error: "Item quota reached. Delete an item before creating another." }, 413);
   }
 
   const now = Date.now();
@@ -60,7 +60,7 @@ pasteRoutes.post("/api/pastes", requireUser, async (c) => {
       )
       .run();
   } catch {
-    return c.json({ error: "Paste ID already exists" }, 409);
+    return c.json({ error: "Item ID already exists" }, 409);
   }
   return c.json({ id: body.id, createdAt: now }, 201);
 });
@@ -68,7 +68,7 @@ pasteRoutes.post("/api/pastes", requireUser, async (c) => {
 pasteRoutes.put("/api/pastes/:id", requireUser, async (c) => {
   const body = await readJson<Omit<PasteWrite, "id">>(c);
   const id = c.req.param("id")!;
-  if (!validPasteWrite(body ? { ...body, id } : null)) return c.json({ error: "Invalid encrypted paste" }, 400);
+  if (!validPasteWrite(body ? { ...body, id } : null)) return c.json({ error: "Invalid encrypted item" }, 400);
 
   const result = await c.env.DB.prepare(
     `UPDATE pastes SET ciphertext = ?, content_iv = ?, wrapped_key = ?, wrapped_key_iv = ?,
@@ -86,7 +86,7 @@ pasteRoutes.put("/api/pastes/:id", requireUser, async (c) => {
       c.get("userId"),
     )
     .run();
-  if (!result.meta.changes) return c.json({ error: "Paste not found" }, 404);
+  if (!result.meta.changes) return c.json({ error: "Item not found" }, 404);
   return c.json({ id });
 });
 
@@ -103,7 +103,7 @@ pasteRoutes.delete("/api/pastes/:id", requireUser, async (c) => {
   const result = await c.env.DB.prepare("DELETE FROM pastes WHERE id = ? AND owner_id = ?")
     .bind(pasteId, c.get("userId"))
     .run();
-  if (!result.meta.changes) return c.json({ error: "Paste not found" }, 404);
+  if (!result.meta.changes) return c.json({ error: "Item not found" }, 404);
   return c.body(null, 204);
 });
 

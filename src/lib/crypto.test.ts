@@ -16,7 +16,7 @@ import {
   unwrapAccountKey,
   wrapAccountKey,
 } from "./crypto";
-import type { PastePayload, StoredAttachment, StoredPaste, StoredShare } from "./types";
+import { itemKindOf, type PastePayload, type StoredAttachment, type StoredPaste, type StoredShare } from "./types";
 
 const payload: PastePayload = {
   title: "Production notes",
@@ -72,6 +72,27 @@ describe("Pastekey envelope encryption", () => {
 
     await expect(decryptSharedPaste(shared, share.secret)).resolves.toMatchObject({ payload });
     await expect(decryptSharedPaste(shared, randomId(32))).rejects.toThrow();
+  });
+
+  it("distinguishes encrypted file items while keeping legacy pastes compatible", async () => {
+    const accountKey = await generateAccountKey();
+    const legacyEncrypted = await encryptNewPaste(accountKey, payload, null);
+    const legacy = await decryptOwnedPaste(accountKey, asStoredPaste(legacyEncrypted.write));
+    expect(itemKindOf(legacy.payload)).toBe("paste");
+
+    const filesPayload: PastePayload = {
+      kind: "files",
+      title: "Design assets",
+      content: "",
+      language: "files",
+    };
+    const encrypted = await encryptNewPaste(accountKey, filesPayload, null);
+    const unlocked = await decryptOwnedPaste(accountKey, asStoredPaste(encrypted.write));
+    expect(itemKindOf(unlocked.payload)).toBe("files");
+    expect(unlocked.payload).toEqual(filesPayload);
+
+    const invalid = await encryptNewPaste(accountKey, { ...payload, kind: "unknown" } as unknown as PastePayload, null);
+    await expect(decryptOwnedPaste(accountKey, asStoredPaste(invalid.write))).rejects.toThrow("Invalid encrypted paste payload");
   });
 
   it("encrypts file bytes and metadata under a paste key", async () => {

@@ -46,11 +46,18 @@ export type StoredShare = {
   attachments: StoredAttachment[];
 };
 
+export type ItemKind = "paste" | "files";
+
 export type PastePayload = {
   title: string;
   content: string;
   language: string;
+  kind?: ItemKind;
 };
+
+export function itemKindOf(payload: PastePayload): ItemKind {
+  return payload.kind === "files" ? "files" : "paste";
+}
 
 export type PasskeySummary = {
   id: string;
