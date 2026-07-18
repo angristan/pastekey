@@ -67,10 +67,12 @@ describe("expired ciphertext cleanup", () => {
       "SELECT COUNT(*) AS count FROM upload_reservations WHERE owner_id = ?",
     ).bind(userId).first<{ count: number }>();
     const jobs = await bindings.DB.prepare(
-      "SELECT COUNT(*) AS count FROM deletion_jobs WHERE owner_id = ?",
-    ).bind(userId).first<{ count: number }>();
+      `SELECT COUNT(*) AS count,
+        SUM(CASE WHEN queued_at IS NOT NULL THEN 1 ELSE 0 END) AS queued
+       FROM deletion_jobs WHERE owner_id = ?`,
+    ).bind(userId).first<{ count: number; queued: number }>();
     expect(reservations?.count).toBe(0);
-    expect(jobs?.count).toBe(101);
+    expect(jobs).toEqual({ count: 101, queued: 101 });
   });
 
   it("moves abandoned upload reservations through the durable deletion queue", async () => {

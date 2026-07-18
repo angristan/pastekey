@@ -1,5 +1,5 @@
 import type { Bindings } from "../types";
-import { enqueuePendingDeletions, recoverStaleDeletions } from "./deletions";
+import { drainPendingDeletions, recoverStaleDeletions } from "./deletions";
 
 // Keep each set-based statement below D1's bound-variable ceiling.
 const EXPIRY_BATCH_SIZE = 90;
@@ -18,7 +18,7 @@ export async function cleanupExpired(env: Bindings) {
     await stageCleanupCandidates(env.DB, candidates, now);
   }
   await recoverStaleDeletions(env.DB, now);
-  await enqueuePendingDeletions(env, now);
+  await drainPendingDeletions(env, now);
 }
 
 export async function findCleanupCandidates(db: D1Database, now: number): Promise<CleanupCandidates> {

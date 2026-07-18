@@ -5,6 +5,7 @@ export const DELETION_QUEUE_NAME = "pastekey-deletions";
 export const DELETION_DLQ_NAME = "pastekey-deletions-dlq";
 
 const ENQUEUE_BATCH_SIZE = 100;
+const MAX_ENQUEUE_BATCHES = 5;
 const HOUR_MS = 60 * 60 * 1_000;
 const MAX_BACKOFF_MS = 24 * HOUR_MS;
 const STALE_DISPATCH_MS = 25 * HOUR_MS;
@@ -48,6 +49,16 @@ export async function enqueuePendingDeletions(env: Bindings, now = Date.now()) {
     ),
   );
   return pending.results.length;
+}
+
+export async function drainPendingDeletions(env: Bindings, now = Date.now()) {
+  let total = 0;
+  for (let batch = 0; batch < MAX_ENQUEUE_BATCHES; batch += 1) {
+    const queued = await enqueuePendingDeletions(env, now);
+    total += queued;
+    if (queued < ENQUEUE_BATCH_SIZE) break;
+  }
+  return total;
 }
 
 export async function recoverStaleDeletions(db: D1Database, now = Date.now()) {
