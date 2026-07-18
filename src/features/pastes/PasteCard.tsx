@@ -20,6 +20,7 @@ import { api } from "../../lib/api";
 import { downloadAttachment, type UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata } from "../../lib/crypto";
 import { formatBytes, formatDate, formatExpiry, messageOf } from "../../lib/format";
+import { settledValues } from "../../lib/settled";
 import { itemKindOf, type StoredAttachment } from "../../lib/types";
 import { mergeShares, type GeneratedShare, type ShareSummary } from "./share-state";
 import type { UnlockedPaste } from "./types";
@@ -70,7 +71,13 @@ export function PasteCard({
     let active = true;
     setPanelError(null);
     loadAttachments()
-      .then((items) => active && setAttachments(items))
+      .then((result) => {
+        if (!active) return;
+        setAttachments(result.values);
+        if (result.failureCount) {
+          setPanelError(`${result.failureCount} encrypted ${result.failureCount === 1 ? "file could" : "files could"} not be decrypted.`);
+        }
+      })
       .catch((cause) => active && setPanelError(messageOf(cause)));
     return () => { active = false; };
   }, [fileItem, paste.stored.id, paste.pasteKey]);
@@ -142,7 +149,7 @@ export function PasteCard({
 
   async function loadAttachments() {
     const result = await api<{ attachments: StoredAttachment[] }>(`/api/pastes/${paste.stored.id}/files`);
-    return Promise.all(
+    return settledValues(
       result.attachments.map(async (stored) => ({ stored, ...(await decryptAttachmentMetadata(paste.pasteKey, stored)) })),
     );
   }
@@ -155,7 +162,11 @@ export function PasteCard({
     setPanelError(null);
     setLoadingFiles(true);
     try {
-      setAttachments(await loadAttachments());
+      const result = await loadAttachments();
+      setAttachments(result.values);
+      if (result.failureCount) {
+        setPanelError(`${result.failureCount} encrypted ${result.failureCount === 1 ? "file could" : "files could"} not be decrypted.`);
+      }
     } catch (cause) {
       setPanelError(messageOf(cause));
     } finally {

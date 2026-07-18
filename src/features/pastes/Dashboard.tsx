@@ -18,6 +18,7 @@ import { CenteredStatus } from "../../components/CenteredStatus";
 import { api, jsonBody } from "../../lib/api";
 import { createShareEnvelope, decryptOwnedPaste } from "../../lib/crypto";
 import { messageOf } from "../../lib/format";
+import { settledValues } from "../../lib/settled";
 import { itemKindOf, type AppConfig, type ItemKind, type MeResponse, type StoredPaste } from "../../lib/types";
 import { PasteCard } from "./PasteCard";
 import type { UnlockedPaste } from "./types";
@@ -42,6 +43,7 @@ export function Dashboard({
   const [pastes, setPastes] = useState<UnlockedPaste[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [failedPasteCount, setFailedPasteCount] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [creator, setCreator] = useState<ItemKind | "choose" | null>(null);
   const [addingPasskey, setAddingPasskey] = useState(false);
@@ -50,12 +52,17 @@ export function Dashboard({
   const loadPastes = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setFailedPasteCount(0);
     try {
       const result = await api<{ pastes: StoredPaste[] }>("/api/pastes");
-      const unlocked = await Promise.all(
+      const unlocked = await settledValues(
         result.pastes.map(async (stored) => ({ stored, ...(await decryptOwnedPaste(accountKey, stored)) })),
       );
-      setPastes(unlocked);
+      setPastes(unlocked.values);
+      setFailedPasteCount(unlocked.failureCount);
+      if (unlocked.failureCount) {
+        setError(`${unlocked.failureCount} encrypted ${unlocked.failureCount === 1 ? "item could" : "items could"} not be decrypted.`);
+      }
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -213,7 +220,14 @@ export function Dashboard({
         {loading ? (
           <CenteredStatus label="Decrypting your items…" compact />
         ) : pastes.length === 0 ? (
-          creator === null ? (
+          creator === null ? failedPasteCount > 0 ? (
+            <LayerCard className="empty-card">
+              <LockKeyIcon size={32} weight="duotone" />
+              <h2>Your items could not be decrypted</h2>
+              <p>The encrypted records were left unchanged. Retry in case this was a temporary browser problem.</p>
+              <Button variant="primary" onClick={() => void loadPastes()}>Retry decryption</Button>
+            </LayerCard>
+          ) : (
             <LayerCard className="empty-card">
               <LockKeyIcon size={32} weight="duotone" />
               <h2>Your vault is empty</h2>

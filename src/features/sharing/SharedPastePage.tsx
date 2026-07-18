@@ -14,6 +14,7 @@ import { api } from "../../lib/api";
 import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptAttachmentMetadata, decryptSharedPaste } from "../../lib/crypto";
 import { formatDate, messageOf } from "../../lib/format";
+import { settledValues } from "../../lib/settled";
 import { itemKindOf, type PastePayload, type StoredShare } from "../../lib/types";
 
 const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
@@ -38,14 +39,18 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
         setMetadata(stored);
         const unlocked = await decryptSharedPaste(stored, secret);
         setPayload(unlocked.payload);
-        setAttachments(
-          await Promise.all(
-            stored.attachments.map(async (attachment) => ({
-              stored: attachment,
-              ...(await decryptAttachmentMetadata(unlocked.pasteKey, attachment)),
-            })),
-          ),
+        const decryptedAttachments = await settledValues(
+          stored.attachments.map(async (attachment) => ({
+            stored: attachment,
+            ...(await decryptAttachmentMetadata(unlocked.pasteKey, attachment)),
+          })),
         );
+        setAttachments(decryptedAttachments.values);
+        if (decryptedAttachments.failureCount) {
+          setPanelError(
+            `${decryptedAttachments.failureCount} encrypted ${decryptedAttachments.failureCount === 1 ? "file could" : "files could"} not be decrypted.`,
+          );
+        }
       })
       .catch((cause) => setError(messageOf(cause)));
   }, [secret, shareId]);
