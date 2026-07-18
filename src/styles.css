@@ -298,6 +298,13 @@ a { color: inherit; }
 .paste-title-row h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .paste-card-head p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .paste-actions { display: flex; align-items: center; gap: 7px; }
+.file-drop-card .paste-card-head { padding: 13px 18px; }
+.file-drop-card .paste-card-head > div:first-child { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.file-drop-card .paste-title-row h2 { font-size: 16px; }
+.file-drop-card .paste-card-head p { margin: 0; white-space: nowrap; }
+.file-drop-card .attachment-list { padding: 9px 18px; gap: 7px; background: var(--paper); }
+.file-drop-card .attachment-row > span { font-weight: 650; }
+.file-drop-card .file-item-status { padding: 12px 18px; }
 .share-error { padding: 10px 22px; color: #9b2c2c; background: #fff0ed; border-top: 1px solid #f1c6bd; font-size: 12px; }
 .share-list { padding: 16px 22px; display: grid; gap: 10px; border-top: 1px solid var(--line); background: #f7f5ef; }
 .share-list > div:first-child { display: flex; justify-content: space-between; gap: 16px; }
@@ -386,6 +393,7 @@ a { color: inherit; }
   .composer-actions > span { display: none; }
   .composer-actions > div { width: 100%; justify-content: flex-end; }
   .paste-card-head { align-items: stretch; }
+  .file-drop-card .paste-card-head > div:first-child { align-items: flex-start; flex-direction: column; gap: 4px; }
   .paste-actions { justify-content: flex-end; flex-wrap: wrap; }
   .paste-actions button span { display: none; }
   .attachment-row { grid-template-columns: auto minmax(0, 1fr) auto; }

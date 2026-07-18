@@ -46,6 +46,15 @@ export function PasteCard({
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
   const fileItem = itemKindOf(paste.payload) === "files";
+  const autoFileTitle = fileItem && (
+    /^\d+ encrypted files$/.test(paste.payload.title) ||
+    (attachments?.length === 1 && attachments[0]?.metadata.name === paste.payload.title)
+  );
+  const displayTitle = autoFileTitle ? "File drop" : paste.payload.title;
+  const fileCount = attachments?.length;
+  const badge = fileItem
+    ? (fileCount === undefined ? "File drop" : `${fileCount} ${fileCount === 1 ? "file" : "files"}`)
+    : paste.payload.language;
   const preview = paste.payload.content.split("\n").slice(0, 4).join("\n");
   const sharePanelId = `share-panel-${paste.stored.id}`;
   const filePanelId = `file-panel-${paste.stored.id}`;
@@ -145,7 +154,7 @@ export function PasteCard({
   }
 
   async function removeFile(attachment: UnlockedAttachment) {
-    if (!window.confirm(`Delete “${attachment.metadata.name}”? This cannot be undone.`)) return;
+    if (!window.confirm(`Remove “${attachment.metadata.name}” from this item? This cannot be undone.`)) return;
     await api<void>(`/api/pastes/${paste.stored.id}/files/${attachment.stored.id}`, { method: "DELETE" });
     setAttachments((current) => current?.filter((item) => item.stored.id !== attachment.stored.id) ?? []);
   }
@@ -160,12 +169,12 @@ export function PasteCard({
   }
 
   return (
-    <LayerCard className="paste-card">
+    <LayerCard className={`paste-card${fileItem ? " file-drop-card" : ""}`}>
       <div className="paste-card-head">
         <div>
           <div className="paste-title-row">
-            <h2>{paste.payload.title}</h2>
-            <Badge>{fileItem ? "File drop" : paste.payload.language}</Badge>
+            <h2>{displayTitle}</h2>
+            <Badge>{badge}</Badge>
           </div>
           <p>Updated {formatDate(paste.stored.updatedAt)} · {formatExpiry(paste.stored.expiresAt)}</p>
         </div>
@@ -173,7 +182,7 @@ export function PasteCard({
           <Button size="sm" icon={ShareNetworkIcon} loading={sharing} onClick={createShare}>Share</Button>
           <Button
             size="sm"
-            variant="secondary"
+            variant="ghost"
             icon={KeyIcon}
             loading={loadingShares}
             data-state={shares !== null ? "open" : "closed"}
@@ -261,9 +270,9 @@ export function PasteCard({
             downloadEndpoint={(attachment) => `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}/content`}
             emptyMessage={fileItem ? "No files remain in this drop." : "No files attached."}
             id={filePanelId}
-            onDelete={removeFile}
+            onDelete={fileItem && attachments.length <= 1 ? undefined : removeFile}
             onError={setPanelError}
-            title={fileItem ? "Encrypted files" : "Encrypted attachments"}
+            title={fileItem ? null : "Encrypted attachments"}
           />
         </Suspense>
       )}

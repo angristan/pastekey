@@ -191,9 +191,7 @@ export function PasteComposer({
     setError(null);
     try {
       setProgress(kind === "files" ? "Encrypting file drop…" : "Encrypting paste…");
-      const fallbackTitle = kind === "files"
-        ? (files.length === 1 ? files[0]!.file.name : `${files.length} encrypted files`)
-        : "Untitled paste";
+      const fallbackTitle = kind === "files" ? "File drop" : "Untitled paste";
       const encrypted = await encryptNewPaste(
         accountKey,
         {

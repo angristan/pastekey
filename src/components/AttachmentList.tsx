@@ -29,12 +29,12 @@ export function AttachmentList({
   id?: string;
   onDelete?: (attachment: UnlockedAttachment) => Promise<void>;
   onError: (message: string) => void;
-  title?: string;
+  title?: string | null;
   buttonSize?: "xs" | "sm";
 }) {
   return (
     <div className={className} id={id}>
-      <strong>{title}</strong>
+      {title && <strong>{title}</strong>}
       {attachments.length === 0 && emptyMessage ? <p>{emptyMessage}</p> : attachments.map((attachment) => (
         <AttachmentRow
           key={attachment.stored.id}
@@ -157,9 +157,10 @@ function AttachmentRow({
               size={buttonSize}
               variant="secondary-destructive"
               loading={deleting}
+              aria-label={`Remove ${attachment.metadata.name}`}
               onClick={remove}
             >
-              Delete
+              Remove
             </Button>
           )}
         </div>
