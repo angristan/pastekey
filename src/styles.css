@@ -89,7 +89,7 @@ a { color: inherit; }
 }
 
 .hero-actions { display: flex; gap: 12px; margin: 18px 0 22px; flex-wrap: wrap; }
-.turnstile { min-height: 65px; margin-top: 28px; }
+.turnstile-visible { min-height: 65px; margin-top: 28px; }
 .hero-copy > [role="alert"] { max-width: 610px; }
 
 .security-card {

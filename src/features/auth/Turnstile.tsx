@@ -6,9 +6,12 @@ type TurnstileApi = {
     options: {
       sitekey: string;
       theme: "auto";
+      appearance: "interaction-only";
       callback: (token: string) => void;
       "expired-callback": () => void;
       "error-callback": () => void;
+      "before-interactive-callback": () => void;
+      "after-interactive-callback": () => void;
     },
   ): string;
   remove(widgetId: string): void;
@@ -35,9 +38,12 @@ export function Turnstile({ siteKey, onToken }: { siteKey: string; onToken: (tok
       widgetId = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
         theme: "auto",
+        appearance: "interaction-only",
         callback: (token) => onToken(token),
         "expired-callback": () => onToken(null),
         "error-callback": () => onToken(null),
+        "before-interactive-callback": () => containerRef.current?.classList.add("turnstile-visible"),
+        "after-interactive-callback": () => containerRef.current?.classList.remove("turnstile-visible"),
       });
     };
 
@@ -56,6 +62,7 @@ export function Turnstile({ siteKey, onToken }: { siteKey: string; onToken: (tok
     return () => {
       disposed = true;
       script?.removeEventListener("load", render);
+      containerRef.current?.classList.remove("turnstile-visible");
       if (widgetId && window.turnstile) window.turnstile.remove(widgetId);
       onToken(null);
     };
