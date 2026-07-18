@@ -92,11 +92,10 @@ bunx wrangler r2 bucket create pastekey-files
 bunx wrangler queues create pastekey-deletions
 bunx wrangler queues create pastekey-deletions-dlq
 bunx wrangler secret put TURNSTILE_SECRET_KEY
-bun run db:migrate:remote
 bun run deploy
 ```
 
-The Turnstile site key is a public `vars` value; its secret must only be stored with `wrangler secret put`. Default quotas are 100 encrypted items, 10 files per item, 25 MiB per file, and 100 MiB of files per account. D1 upload reservations enforce file-count and storage limits before ciphertext reaches R2.
+`bun run deploy` is the supported release path: it runs typecheck, tests, a production build, a Wrangler dry-run, applies pending remote D1 migrations, and only then deploys the Worker. The Turnstile site key is a public `vars` value; its secret must only be stored with `wrangler secret put`. Default quotas are 100 encrypted items, 10 files per item, 25 MiB per file, and 100 MiB of files per account. D1 upload reservations enforce file-count and storage limits before ciphertext reaches R2.
 
 This repository is configured for `paste.stanislas.cloud`; forks must use their own D1 database and domain. Once passkeys exist for an RP ID, changing it requires registering new credentials.
 
@@ -107,5 +106,7 @@ bun run dev
 bun run typecheck
 bun run test
 bun run build
+bun run verify
+bun run deploy
 bun run db:migrate:local
 ```
