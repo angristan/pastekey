@@ -4,12 +4,12 @@ import {
   accountDeletionWorkflowId,
   startAccountDeletionWorkflow,
 } from "../services/account-deletions";
-import { destroySession, requireUser } from "../services/sessions";
+import { destroySession, requireRecentUser } from "../services/sessions";
 import type { AppEnv } from "../types";
 
 export const accountRoutes = new Hono<AppEnv>();
 
-accountRoutes.delete("/api/account", requireUser, async (c) => {
+accountRoutes.delete("/api/account", requireRecentUser, async (c) => {
   const userId = c.get("userId");
   const workflowId = accountDeletionWorkflowId(userId);
   const requestedAt = Date.now();

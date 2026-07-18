@@ -100,6 +100,11 @@ export function Dashboard({
     setDeletingAccount(true);
     setError(null);
     try {
+      const { unlockWithPasskey } = await import("../../lib/passkeys");
+      const verified = await unlockWithPasskey();
+      if (verified.auth.userId !== me.userId) {
+        throw new Error("The selected passkey belongs to another account");
+      }
       await api<{ status: "deleting" }>("/api/account", { method: "DELETE" });
       window.alert("Account deletion started. Access has been revoked and encrypted storage is being removed.");
       onAccountDeleted();

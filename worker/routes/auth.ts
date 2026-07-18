@@ -133,8 +133,21 @@ authRoutes.post("/api/auth/register/verify", async (c) => {
 
 authRoutes.post("/api/auth/login/options", async (c) => {
   const { rpID } = relyingParty(c);
-  const options = await generateAuthenticationOptions({ rpID, userVerification: "required" });
-  await storeCeremony(c, options.challenge, "login", null);
+  const userId = await currentUser(c);
+  const credentials = userId
+    ? await c.env.DB.prepare("SELECT id, transports FROM credentials WHERE user_id = ?")
+      .bind(userId)
+      .all<{ id: string; transports: string }>()
+    : null;
+  const options = await generateAuthenticationOptions({
+    rpID,
+    userVerification: "required",
+    allowCredentials: credentials?.results.map((credential) => ({
+      id: credential.id,
+      transports: parseTransports(credential.transports),
+    })),
+  });
+  await storeCeremony(c, options.challenge, "login", userId);
   return c.json(options);
 });
 
@@ -152,6 +165,9 @@ authRoutes.post("/api/auth/login/verify", async (c) => {
     .bind(body.credential.id)
     .first<CredentialRow>();
   if (!stored) return c.json({ error: "Unknown passkey" }, 401);
+  if (ceremony.user_id && ceremony.user_id !== stored.user_id) {
+    return c.json({ error: "Passkey does not belong to the active account" }, 401);
+  }
 
   const { rpID, origin } = relyingParty(c);
   let verification;

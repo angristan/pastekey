@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hashToken } from "../lib/encoding";
 import { accountDeletionWorkflowId } from "../services/account-deletions";
+import { RECENT_AUTH_WINDOW_MS } from "../services/sessions";
 import { accountRoutes } from "./account";
 import type { Bindings } from "../types";
 
@@ -46,6 +47,29 @@ describe("account deletion workflow", () => {
     await bindings.FILES.delete(objectKey);
     await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("rejects account deletion from a stale session", async () => {
+    await bindings.DB.prepare("UPDATE sessions SET created_at = ? WHERE user_id = ?")
+      .bind(Date.now() - RECENT_AUTH_WINDOW_MS - 1, userId)
+      .run();
+
+    const response = await SELF.fetch("https://paste.test/api/account", {
+      method: "DELETE",
+      headers: { Cookie: `pk_session=${token}` },
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Verify your passkey again before deleting the account",
+    });
+    const user = await bindings.DB.prepare(
+      "SELECT deletion_requested_at AS requestedAt FROM users WHERE id = ?",
+    )
+      .bind(userId)
+      .first<{ requestedAt: number | null }>();
+    expect(user?.requestedAt).toBeNull();
+    expect(await bindings.FILES.get(objectKey)).not.toBeNull();
   });
 
   it("keeps deletion intent when Workflow creation has an ambiguous failure", async () => {

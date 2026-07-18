@@ -72,6 +72,16 @@ describe("concurrent account invariants", () => {
       credential("credential-two-000002"),
     ]);
 
+    const options = await SELF.fetch("https://paste.test/api/auth/login/options", {
+      method: "POST",
+      headers: { Cookie: `pk_session=${token}` },
+    });
+    const optionsBody = await options.json() as { allowCredentials?: { id: string }[] };
+    expect(optionsBody.allowCredentials?.map(({ id }) => id).sort()).toEqual([
+      "credential-one-000001",
+      "credential-two-000002",
+    ]);
+
     const remove = (id: string) => SELF.fetch(`https://paste.test/api/auth/passkeys/${id}`, {
       method: "DELETE",
       headers: { Cookie: `pk_session=${token}` },
