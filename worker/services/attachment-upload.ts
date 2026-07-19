@@ -14,17 +14,16 @@ import type { D1Error } from "../platform/d1";
 import {
   countPasteAttachmentsAndReservations,
   finalizeAttachment,
+  findActiveOwnedAttachmentDeletion,
+  findActiveOwnedAttachmentObject,
   findActivePasteIdentity,
   findAttachmentIdentity,
   findFinalizedAttachment,
-  findOwnedAttachmentDeletion,
-  findOwnedAttachmentObject,
-  listAttachments,
+  listActiveOwnedPasteAttachments,
   reserveAttachment,
   stageAttachmentDeletion,
   stageReservationDeletion,
 } from "../repositories/attachments";
-import { findActiveOwnedPaste } from "../repositories/pastes";
 
 export { dispatchPendingAttachmentDeletions } from "./deletions";
 
@@ -175,34 +174,31 @@ export const uploadAttachment = Effect.fn("AttachmentUpload.uploadAttachment")(
 
 export const listAttachmentsForPaste = Effect.fn("AttachmentUpload.listAttachmentsForPaste")(
   function* (pasteId: string, ownerId: string) {
-    const paste = yield* findActiveOwnedPaste(pasteId, ownerId);
-    if (paste === null) return null;
-    return yield* listAttachments(pasteId);
+    return yield* listActiveOwnedPasteAttachments(pasteId, ownerId);
   },
 );
 
 export const openOwnedAttachment = Effect.fn("AttachmentUpload.openOwnedAttachment")(
   function* (pasteId: string, fileId: string, ownerId: string) {
-    const paste = yield* findActiveOwnedPaste(pasteId, ownerId);
-    if (paste === null) {
-      return { status: "item-not-found" } satisfies AttachmentLookupOutcome<never>;
+    const attachment = yield* findActiveOwnedAttachmentObject(fileId, pasteId, ownerId);
+    if (attachment !== null) {
+      return { status: "found", value: attachment } satisfies AttachmentLookupOutcome<typeof attachment>;
     }
-    const attachment = yield* findOwnedAttachmentObject(fileId, pasteId, ownerId);
-    if (attachment === null) {
-      return { status: "attachment-not-found" } satisfies AttachmentLookupOutcome<never>;
-    }
-    return { status: "found", value: attachment } satisfies AttachmentLookupOutcome<typeof attachment>;
+    const paste = yield* findActivePasteIdentity(pasteId, ownerId);
+    return paste === null
+      ? { status: "item-not-found" } satisfies AttachmentLookupOutcome<never>
+      : { status: "attachment-not-found" } satisfies AttachmentLookupOutcome<never>;
   },
 );
 
 export const deleteOwnedAttachment = Effect.fn("AttachmentUpload.deleteOwnedAttachment")(
   function* (pasteId: string, fileId: string, ownerId: string) {
-    const paste = yield* findActiveOwnedPaste(pasteId, ownerId);
-    if (paste === null) return { status: "item-not-found" } satisfies AttachmentDeleteOutcome;
-
-    const attachment = yield* findOwnedAttachmentDeletion(fileId, pasteId, ownerId);
+    const attachment = yield* findActiveOwnedAttachmentDeletion(fileId, pasteId, ownerId);
     if (attachment === null) {
-      return { status: "attachment-not-found" } satisfies AttachmentDeleteOutcome;
+      const paste = yield* findActivePasteIdentity(pasteId, ownerId);
+      return paste === null
+        ? { status: "item-not-found" } satisfies AttachmentDeleteOutcome
+        : { status: "attachment-not-found" } satisfies AttachmentDeleteOutcome;
     }
     yield* stageAttachmentDeletion(attachment, pasteId, ownerId);
     return { status: "deleted" } satisfies AttachmentDeleteOutcome;

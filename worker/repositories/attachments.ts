@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 
 import { StoredAttachment } from "../../shared/schema/attachments";
+import { Base64Url, NonNegativeInteger, OpaqueId, Timestamp } from "../../shared/schema/primitives";
 import { D1 } from "../platform/d1";
 
 export const UPLOAD_RESERVATION_TTL_MS = 2 * 60 * 60 * 1_000;
@@ -25,6 +26,18 @@ export type AttachmentInsert = AttachmentReservation & {
 const CreatedAtRow = Schema.Struct({ createdAt: Schema.Number });
 const IdRow = Schema.Struct({ id: Schema.String });
 const CountRow = Schema.Struct({ count: Schema.Number });
+const OwnedAttachmentRow = Schema.Struct({
+  marker: Schema.Literals([0, 1]),
+  id: OpaqueId,
+  pasteId: OpaqueId,
+  ciphertextSize: NonNegativeInteger,
+  contentIv: Base64Url,
+  wrappedKey: Base64Url,
+  wrappedKeyIv: Base64Url,
+  metadataCiphertext: Base64Url,
+  metadataIv: Base64Url,
+  createdAt: Timestamp,
+});
 const AttachmentObjectRow = Schema.Struct({ objectKey: Schema.String });
 const AttachmentDeletionRow = Schema.Struct({
   id: Schema.String,
@@ -214,61 +227,99 @@ export const listActiveOwnedAttachments = Effect.fn("AttachmentsRepository.listA
   },
 );
 
-export const listAttachments = Effect.fn("AttachmentsRepository.listAttachments")(
-  function* (pasteId: string) {
-    const d1 = yield* D1;
-    const rows = yield* d1.all(
-      d1.bind(
-        d1.prepare(
-          `SELECT id, paste_id AS pasteId, ciphertext_size AS ciphertextSize, content_iv AS contentIv,
-      wrapped_key AS wrappedKey, wrapped_key_iv AS wrappedKeyIv,
-      metadata_ciphertext AS metadataCiphertext, metadata_iv AS metadataIv, created_at AS createdAt
-     FROM attachments WHERE paste_id = ? ORDER BY created_at`,
-        ),
-        pasteId,
+export const listActiveOwnedPasteAttachments = Effect.fn(
+  "AttachmentsRepository.listActiveOwnedPasteAttachments",
+)(function* (pasteId: string, ownerId: string, now = Date.now()) {
+  const d1 = yield* D1;
+  const rows = yield* d1.all(
+    d1.bind(
+      d1.prepare(
+        `WITH active_paste AS (
+       SELECT p.id, p.created_at
+       FROM pastes p JOIN users u ON u.id = p.owner_id
+       WHERE p.id = ? AND p.owner_id = ? AND u.deletion_requested_at IS NULL
+         AND (p.expires_at IS NULL OR p.expires_at > ?)
+     )
+     SELECT 0 AS marker, p.id, p.id AS pasteId, 0 AS ciphertextSize,
+       'AA' AS contentIv, 'AA' AS wrappedKey, 'AA' AS wrappedKeyIv,
+       'AA' AS metadataCiphertext, 'AA' AS metadataIv, p.created_at AS createdAt
+     FROM active_paste p
+     UNION ALL
+     SELECT 1 AS marker, a.id, a.paste_id AS pasteId, a.ciphertext_size AS ciphertextSize,
+       a.content_iv AS contentIv, a.wrapped_key AS wrappedKey, a.wrapped_key_iv AS wrappedKeyIv,
+       a.metadata_ciphertext AS metadataCiphertext, a.metadata_iv AS metadataIv, a.created_at AS createdAt
+     FROM attachments a JOIN active_paste p ON p.id = a.paste_id
+     ORDER BY marker, createdAt`,
       ),
-      StoredAttachment,
-    );
-    return rows.results;
-  },
-);
+      pasteId,
+      ownerId,
+      now,
+    ),
+    OwnedAttachmentRow,
+  );
+  if (rows.results.length === 0) return null;
+  return rows.results.flatMap((row) => row.marker === 0
+    ? []
+    : [{
+      id: row.id,
+      pasteId: row.pasteId,
+      ciphertextSize: row.ciphertextSize,
+      contentIv: row.contentIv,
+      wrappedKey: row.wrappedKey,
+      wrappedKeyIv: row.wrappedKeyIv,
+      metadataCiphertext: row.metadataCiphertext,
+      metadataIv: row.metadataIv,
+      createdAt: row.createdAt,
+    }]);
+});
 
-export const findOwnedAttachmentObject = Effect.fn("AttachmentsRepository.findOwnedAttachmentObject")(
-  function* (fileId: string, pasteId: string, ownerId: string) {
-    const d1 = yield* D1;
-    return yield* d1.first(
-      d1.bind(
-        d1.prepare(
-          `SELECT a.object_key AS objectKey FROM attachments a JOIN pastes p ON p.id = a.paste_id
-     WHERE a.id = ? AND p.id = ? AND p.owner_id = ?`,
-        ),
-        fileId,
-        pasteId,
-        ownerId,
+export const findActiveOwnedAttachmentObject = Effect.fn(
+  "AttachmentsRepository.findActiveOwnedAttachmentObject",
+)(function* (fileId: string, pasteId: string, ownerId: string, now = Date.now()) {
+  const d1 = yield* D1;
+  return yield* d1.first(
+    d1.bind(
+      d1.prepare(
+        `SELECT a.object_key AS objectKey
+     FROM attachments a
+     JOIN pastes p ON p.id = a.paste_id
+     JOIN users u ON u.id = p.owner_id
+     WHERE a.id = ? AND p.id = ? AND p.owner_id = ?
+       AND u.deletion_requested_at IS NULL
+       AND (p.expires_at IS NULL OR p.expires_at > ?)`,
       ),
-      AttachmentObjectRow,
-    );
-  },
-);
+      fileId,
+      pasteId,
+      ownerId,
+      now,
+    ),
+    AttachmentObjectRow,
+  );
+});
 
-export const findOwnedAttachmentDeletion = Effect.fn("AttachmentsRepository.findOwnedAttachmentDeletion")(
-  function* (fileId: string, pasteId: string, ownerId: string) {
-    const d1 = yield* D1;
-    return yield* d1.first(
-      d1.bind(
-        d1.prepare(
-          `SELECT a.id, a.object_key AS objectKey, a.ciphertext_size AS ciphertextSize
-     FROM attachments a JOIN pastes p ON p.id = a.paste_id
-     WHERE a.id = ? AND p.id = ? AND p.owner_id = ?`,
-        ),
-        fileId,
-        pasteId,
-        ownerId,
+export const findActiveOwnedAttachmentDeletion = Effect.fn(
+  "AttachmentsRepository.findActiveOwnedAttachmentDeletion",
+)(function* (fileId: string, pasteId: string, ownerId: string, now = Date.now()) {
+  const d1 = yield* D1;
+  return yield* d1.first(
+    d1.bind(
+      d1.prepare(
+        `SELECT a.id, a.object_key AS objectKey, a.ciphertext_size AS ciphertextSize
+     FROM attachments a
+     JOIN pastes p ON p.id = a.paste_id
+     JOIN users u ON u.id = p.owner_id
+     WHERE a.id = ? AND p.id = ? AND p.owner_id = ?
+       AND u.deletion_requested_at IS NULL
+       AND (p.expires_at IS NULL OR p.expires_at > ?)`,
       ),
-      AttachmentDeletionRow,
-    );
-  },
-);
+      fileId,
+      pasteId,
+      ownerId,
+      now,
+    ),
+    AttachmentDeletionRow,
+  );
+});
 
 export const stageAttachmentDeletion = Effect.fn("AttachmentsRepository.stageAttachmentDeletion")(
   function* (

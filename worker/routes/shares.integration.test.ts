@@ -3,6 +3,8 @@ import { SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { hashToken } from "../lib/encoding";
+import { runWorkerEffect } from "../runtime";
+import { createShare, listShares, revokeShare } from "../services/paste-mutations";
 import type { Bindings } from "../types";
 
 const bindings = env as unknown as Bindings;
@@ -32,6 +34,49 @@ describe("share-link routes", () => {
   afterEach(async () => {
     await bindings.FILES.delete(objectKey);
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("returns an empty share list for an active item", async () => {
+    const response = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/shares`, {
+      headers: authHeaders,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ shares: [] });
+  });
+
+  it("distinguishes a missing share from a missing item", async () => {
+    const missingShare = await SELF.fetch(
+      `https://paste.test/api/pastes/${pasteId}/shares/${shareId}`,
+      { method: "DELETE", headers: authHeaders },
+    );
+    expect(missingShare.status).toBe(404);
+    await expect(missingShare.json()).resolves.toEqual({ error: "Share not found" });
+
+    const missingItem = await SELF.fetch(
+      `https://paste.test/api/pastes/missingpaste12345678901/shares/${shareId}`,
+      { method: "DELETE", headers: authHeaders },
+    );
+    expect(missingItem.status).toBe(404);
+    await expect(missingItem.json()).resolves.toEqual({ error: "Item not found" });
+  });
+
+  it("rejects direct share queries after account deletion begins", async () => {
+    await bindings.DB.prepare(
+      "INSERT INTO shares (id, paste_id, wrapped_key, wrapped_key_iv, created_at, expires_at) VALUES (?, ?, 'AA', 'AA', ?, NULL)",
+    ).bind(shareId, pasteId, Date.now()).run();
+    await bindings.DB.prepare(
+      "UPDATE users SET deletion_requested_at = ?, deletion_workflow_id = ? WHERE id = ?",
+    ).bind(Date.now(), "share-query-workflow", userId).run();
+
+    await expect(runWorkerEffect(bindings, listShares(pasteId, userId))).resolves.toBeNull();
+    await expect(runWorkerEffect(bindings, createShare(
+      pasteId,
+      userId,
+      { id: "deleting-share-0000001", wrappedKey: "AA", wrappedKeyIv: "AA" },
+      null,
+    ))).resolves.toBeNull();
+    await expect(runWorkerEffect(bindings, revokeShare(pasteId, shareId, userId))).resolves.toBeNull();
   });
 
   it("rejects share management after the item expires", async () => {

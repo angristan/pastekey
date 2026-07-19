@@ -74,6 +74,22 @@ describe("concurrent account invariants", () => {
       ).bind(pasteId, userId, now, now),
     ]);
 
+    const get = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}`, {
+      headers: { Cookie: `pk_session=${token}` },
+    });
+    expect(get.status).toBe(200);
+    await expect(get.json()).resolves.toEqual({
+      id: pasteId,
+      ciphertext: "AA",
+      contentIv: "AA",
+      wrappedKey: "AA",
+      wrappedKeyIv: "AA",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: null,
+      version: 1,
+    });
+
     const response = await SELF.fetch("https://paste.test/api/pastes", {
       method: "POST",
       headers: { Cookie: `pk_session=${token}`, "Content-Type": "application/json" },

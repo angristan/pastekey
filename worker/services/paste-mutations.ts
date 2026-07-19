@@ -4,13 +4,13 @@ import type { PasteWrite, ShareWrite } from "../../shared/protocol/pastes";
 import { DomainConflictError, isD1UniqueConstraint } from "../lib/errors";
 import { D1, type D1Error } from "../platform/d1";
 import {
-  deletePasteShare,
-  findActiveOwnedPaste,
+  deleteActiveOwnedPasteShare,
+  findActiveOwnedPasteIdentity,
   findActiveShare,
   findActiveShareAttachment,
-  insertShare,
+  insertActiveOwnedShare,
+  listActiveOwnedPasteShares,
   listPasteAttachments,
-  listPasteShares,
   updateActiveOwnedPaste,
 } from "../repositories/pastes";
 
@@ -121,9 +121,7 @@ export const deletePaste = Effect.fn("PasteMutations.deletePaste")(
 
 export const listShares = Effect.fn("PasteMutations.listShares")(
   function* (pasteId: string, ownerId: string) {
-    const owned = yield* findActiveOwnedPaste(pasteId, ownerId);
-    if (owned === null) return null;
-    return yield* listPasteShares(pasteId);
+    return yield* listActiveOwnedPasteShares(pasteId, ownerId);
   },
 );
 
@@ -134,28 +132,26 @@ export const createShare = Effect.fn("PasteMutations.createShare")(
     write: ShareWrite,
     expiresAt: number | null,
   ) {
-    const paste = yield* findActiveOwnedPaste(pasteId, ownerId);
-    if (paste === null) return null;
-
     const createdAt = Date.now();
-    yield* insertShare(
+    const inserted = yield* insertActiveOwnedShare(
       pasteId,
+      ownerId,
       write.id,
       write.wrappedKey,
       write.wrappedKeyIv,
       createdAt,
       expiresAt,
     ).pipe(Effect.mapError(mapUniqueConflict("Share ID already exists")));
-    return createdAt;
+    return inserted.meta.changes ? createdAt : null;
   },
 );
 
 export const revokeShare = Effect.fn("PasteMutations.revokeShare")(
   function* (pasteId: string, shareId: string, ownerId: string) {
-    const owned = yield* findActiveOwnedPaste(pasteId, ownerId);
-    if (owned === null) return null;
-    const result = yield* deletePasteShare(shareId, pasteId);
-    return Boolean(result.meta.changes);
+    const result = yield* deleteActiveOwnedPasteShare(shareId, pasteId, ownerId);
+    if (result.meta.changes) return true;
+    const owned = yield* findActiveOwnedPasteIdentity(pasteId, ownerId);
+    return owned === null ? null : false;
   },
 );
 

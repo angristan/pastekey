@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { hashToken } from "../lib/encoding";
 import { finalizeAttachment, reserveAttachment } from "../repositories/attachments";
 import { runWorkerEffect } from "../runtime";
+import {
+  listAttachmentsForPaste,
+  openOwnedAttachment,
+} from "../services/attachment-upload";
 import { consumeDeletionQueue } from "../services/deletions";
 import type { Bindings, DeletionMessage } from "../types";
 
@@ -40,6 +44,43 @@ describe("authenticated attachment routes", () => {
     await bindings.DB.prepare("DELETE FROM upload_reservations WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("returns an empty list for an active item without attachments", async () => {
+    const response = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/files`, {
+      headers: { Cookie: `pk_session=${token}` },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ attachments: [] });
+  });
+
+  it("distinguishes missing attachments from missing items", async () => {
+    const headers = { Cookie: `pk_session=${token}` };
+    const missingFile = await SELF.fetch(
+      `https://paste.test/api/pastes/${pasteId}/files/${fileId}/content`,
+      { headers },
+    );
+    expect(missingFile.status).toBe(404);
+    await expect(missingFile.json()).resolves.toEqual({ error: "Attachment not found" });
+
+    const missingItem = await SELF.fetch(
+      `https://paste.test/api/pastes/missingpaste12345678901/files/${fileId}/content`,
+      { headers },
+    );
+    expect(missingItem.status).toBe(404);
+    await expect(missingItem.json()).resolves.toEqual({ error: "Item not found" });
+  });
+
+  it("rejects direct attachment queries after account deletion begins", async () => {
+    await bindings.DB.prepare(
+      "UPDATE users SET deletion_requested_at = ?, deletion_workflow_id = ? WHERE id = ?",
+    ).bind(Date.now(), "attachment-query-workflow", userId).run();
+
+    await expect(runWorkerEffect(bindings, listAttachmentsForPaste(pasteId, userId))).resolves.toBeNull();
+    await expect(runWorkerEffect(bindings, openOwnedAttachment(pasteId, fileId, userId))).resolves.toEqual({
+      status: "item-not-found",
+    });
   });
 
   it("rejects attachment access after the item expires", async () => {

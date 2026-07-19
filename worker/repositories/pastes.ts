@@ -8,11 +8,14 @@ import { D1 } from "../platform/d1";
 
 const NullableTimestamp = Schema.Union([Timestamp, Schema.Null]);
 
-class ShareSummaryRow extends Schema.Class<ShareSummaryRow>("ShareSummaryRow")({
+class OwnedShareSummaryRow extends Schema.Class<OwnedShareSummaryRow>("OwnedShareSummaryRow")({
+  marker: Schema.Literals([0, 1]),
   id: OpaqueId,
   createdAt: Timestamp,
   expiresAt: NullableTimestamp,
 }) {}
+
+const IdRow = Schema.Struct({ id: OpaqueId });
 
 class ActiveShareRow extends Schema.Class<ActiveShareRow>("ActiveShareRow")({
   id: OpaqueId,
@@ -75,6 +78,25 @@ export const findActiveOwnedPaste = Effect.fn("PastesRepository.findActiveOwnedP
   },
 );
 
+export const findActiveOwnedPasteIdentity = Effect.fn("PastesRepository.findActiveOwnedPasteIdentity")(
+  function* (pasteId: string, ownerId: string, now = Date.now()) {
+    const d1 = yield* D1;
+    return yield* d1.first(
+      d1.bind(
+        d1.prepare(
+          `SELECT p.id FROM pastes p JOIN users u ON u.id = p.owner_id
+     WHERE p.id = ? AND p.owner_id = ? AND u.deletion_requested_at IS NULL
+       AND (p.expires_at IS NULL OR p.expires_at > ?)`,
+        ),
+        pasteId,
+        ownerId,
+        now,
+      ),
+      IdRow,
+    );
+  },
+);
+
 export const updateActiveOwnedPaste = Effect.fn("PastesRepository.updateActiveOwnedPaste")(
   function* (
     pasteId: string,
@@ -109,26 +131,42 @@ export const updateActiveOwnedPaste = Effect.fn("PastesRepository.updateActiveOw
   },
 );
 
-export const listPasteShares = Effect.fn("PastesRepository.listPasteShares")(
-  function* (pasteId: string) {
+export const listActiveOwnedPasteShares = Effect.fn("PastesRepository.listActiveOwnedPasteShares")(
+  function* (pasteId: string, ownerId: string, now = Date.now()) {
     const d1 = yield* D1;
-    const shares = yield* d1.all(
+    const rows = yield* d1.all(
       d1.bind(
         d1.prepare(
-          `SELECT id, created_at AS createdAt, expires_at AS expiresAt
-     FROM shares WHERE paste_id = ? ORDER BY created_at DESC`,
+          `WITH active_paste AS (
+       SELECT p.id, p.created_at
+       FROM pastes p JOIN users u ON u.id = p.owner_id
+       WHERE p.id = ? AND p.owner_id = ? AND u.deletion_requested_at IS NULL
+         AND (p.expires_at IS NULL OR p.expires_at > ?)
+     )
+     SELECT 0 AS marker, p.id, p.created_at AS createdAt, NULL AS expiresAt
+     FROM active_paste p
+     UNION ALL
+     SELECT 1 AS marker, s.id, s.created_at AS createdAt, s.expires_at AS expiresAt
+     FROM shares s JOIN active_paste p ON p.id = s.paste_id
+     ORDER BY marker, createdAt DESC`,
         ),
         pasteId,
+        ownerId,
+        now,
       ),
-      ShareSummaryRow,
+      OwnedShareSummaryRow,
     );
-    return shares.results;
+    if (rows.results.length === 0) return null;
+    return rows.results.flatMap((row) => row.marker === 0
+      ? []
+      : [{ id: row.id, createdAt: row.createdAt, expiresAt: row.expiresAt }]);
   },
 );
 
-export const insertShare = Effect.fn("PastesRepository.insertShare")(
+export const insertActiveOwnedShare = Effect.fn("PastesRepository.insertActiveOwnedShare")(
   function* (
     pasteId: string,
+    ownerId: string,
     id: string,
     wrappedKey: string,
     wrappedKeyIv: string,
@@ -139,27 +177,42 @@ export const insertShare = Effect.fn("PastesRepository.insertShare")(
     return yield* d1.run(
       d1.bind(
         d1.prepare(
-          "INSERT INTO shares (id, paste_id, wrapped_key, wrapped_key_iv, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+          `INSERT INTO shares (id, paste_id, wrapped_key, wrapped_key_iv, created_at, expires_at)
+     SELECT ?, p.id, ?, ?, ?, ?
+     FROM pastes p JOIN users u ON u.id = p.owner_id
+     WHERE p.id = ? AND p.owner_id = ? AND u.deletion_requested_at IS NULL
+       AND (p.expires_at IS NULL OR p.expires_at > ?)`,
         ),
         id,
-        pasteId,
         wrappedKey,
         wrappedKeyIv,
         createdAt,
         expiresAt,
+        pasteId,
+        ownerId,
+        createdAt,
       ),
     );
   },
 );
 
-export const deletePasteShare = Effect.fn("PastesRepository.deletePasteShare")(
-  function* (shareId: string, pasteId: string) {
+export const deleteActiveOwnedPasteShare = Effect.fn("PastesRepository.deleteActiveOwnedPasteShare")(
+  function* (shareId: string, pasteId: string, ownerId: string, now = Date.now()) {
     const d1 = yield* D1;
     return yield* d1.run(
       d1.bind(
-        d1.prepare("DELETE FROM shares WHERE id = ? AND paste_id = ?"),
+        d1.prepare(
+          `DELETE FROM shares WHERE id = ? AND paste_id = ?
+     AND EXISTS (
+       SELECT 1 FROM pastes p JOIN users u ON u.id = p.owner_id
+       WHERE p.id = shares.paste_id AND p.owner_id = ? AND u.deletion_requested_at IS NULL
+         AND (p.expires_at IS NULL OR p.expires_at > ?)
+     )`,
+        ),
         shareId,
         pasteId,
+        ownerId,
+        now,
       ),
     );
   },
