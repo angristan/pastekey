@@ -29,6 +29,7 @@ export const cleanupExpired = Effect.fn("Cleanup.cleanupExpired")(
       }
       yield* stageCleanupCandidates(candidates, now);
     }
+    yield* deleteExpiredGlobalRows(now);
     yield* recoverStaleDeletions(now);
     yield* drainPendingDeletions(now);
   },
@@ -143,7 +144,14 @@ export const stageCleanupCandidates = Effect.fn("Cleanup.stageCleanupCandidates"
         ),
       );
     }
-    statements.push(
+    yield* d1.batch(statements);
+  },
+);
+
+const deleteExpiredGlobalRows = Effect.fn("Cleanup.deleteExpiredGlobalRows")(
+  function* (now: number) {
+    const d1 = yield* D1;
+    yield* d1.batch([
       d1.bind(
         d1.prepare(
           `DELETE FROM pastes WHERE expires_at IS NOT NULL AND expires_at <= ?
@@ -165,8 +173,7 @@ export const stageCleanupCandidates = Effect.fn("Cleanup.stageCleanupCandidates"
         d1.prepare("DELETE FROM sessions WHERE expires_at <= ?"),
         now,
       ),
-    );
-    yield* d1.batch(statements);
+    ]);
   },
 );
 
