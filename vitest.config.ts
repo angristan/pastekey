@@ -13,7 +13,7 @@ export default defineConfig({
     })),
   ],
   test: {
-    include: ["src/**/*.test.ts", "worker/**/*.test.ts"],
+    include: ["shared/**/*.test.ts", "src/**/*.test.ts", "worker/**/*.test.ts"],
     setupFiles: ["./worker/test/setup.ts"],
   },
 });

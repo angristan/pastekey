@@ -1,0 +1,57 @@
+import { Schema } from "effect";
+
+import { StoredAttachment } from "./attachments";
+import { Base64Url, NonNegativeInteger, OpaqueId, Timestamp } from "./primitives";
+
+const NullableTimestamp = Schema.Union([Timestamp, Schema.Null]);
+
+export const ItemKind = Schema.Literals(["paste", "files"]);
+export type ItemKind = typeof ItemKind.Type;
+
+export class PastePayload extends Schema.Class<PastePayload>("PastePayload")({
+  title: Schema.String,
+  content: Schema.String,
+  language: Schema.String,
+  kind: Schema.optionalKey(ItemKind),
+}) {}
+
+export class PasteWrite extends Schema.Class<PasteWrite>("PasteWrite")({
+  id: OpaqueId,
+  ciphertext: Base64Url,
+  contentIv: Base64Url,
+  wrappedKey: Base64Url,
+  wrappedKeyIv: Base64Url,
+  expiresAt: Schema.optionalKey(NullableTimestamp),
+}) {}
+
+export class StoredPaste extends Schema.Class<StoredPaste>("StoredPaste")({
+  id: OpaqueId,
+  ciphertext: Base64Url,
+  contentIv: Base64Url,
+  wrappedKey: Base64Url,
+  wrappedKeyIv: Base64Url,
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+  expiresAt: NullableTimestamp,
+  version: NonNegativeInteger,
+}) {}
+
+export class ShareWrite extends Schema.Class<ShareWrite>("ShareWrite")({
+  id: OpaqueId,
+  wrappedKey: Base64Url,
+  wrappedKeyIv: Base64Url,
+  expiresAt: Schema.optionalKey(NullableTimestamp),
+}) {}
+
+export class StoredShare extends Schema.Class<StoredShare>("StoredShare")({
+  id: OpaqueId,
+  pasteId: OpaqueId,
+  ciphertext: Base64Url,
+  contentIv: Base64Url,
+  wrappedKey: Base64Url,
+  wrappedKeyIv: Base64Url,
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+  expiresAt: NullableTimestamp,
+  attachments: Schema.Array(StoredAttachment),
+}) {}
