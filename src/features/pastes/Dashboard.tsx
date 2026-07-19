@@ -11,29 +11,25 @@ import {
   TrashIcon,
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { Brand, GitHubLink } from "../../components/Brand";
 import { CenteredStatus } from "../../components/CenteredStatus";
-import { requestApi } from "../../effect/runtime";
+import { browserRuntime, requestApi } from "../../effect/runtime";
 import { jsonBody } from "../../lib/api";
-import { createShareEnvelope, decryptOwnedPaste } from "../../lib/crypto";
-import { settledMap } from "../../lib/concurrency";
+import { createShareEnvelope } from "../../lib/crypto";
 import { messageOf } from "../../lib/format";
 import {
   AccountDeletionResponse,
-  AttachmentListResponse,
   NoContentResponse,
-  PasteListResponse,
   ShareCreateResponse,
 } from "../../../shared/schema/api";
-import type { StoredAttachment } from "../../../shared/protocol/attachments";
 import type { MeResponse } from "../../../shared/protocol/auth";
 import type { AppConfig } from "../../../shared/protocol/config";
 import { itemKindOf, type ItemKind } from "../../../shared/protocol/pastes";
 import { PasteCard } from "./PasteCard";
 import type { UnlockedPaste } from "./types";
-import { unlockAttachments } from "./useUnlockedAttachments";
+import { loadOwnedPastesEffect } from "./useUnlockedAttachments";
 
 const PasteComposer = lazy(() => import("./PasteComposer").then((module) => ({ default: module.PasteComposer })));
 
@@ -60,49 +56,37 @@ export function Dashboard({
   const [creator, setCreator] = useState<ItemKind | "choose" | null>(null);
   const [addingPasskey, setAddingPasskey] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const loadController = useRef<AbortController | null>(null);
 
   const loadPastes = useCallback(async () => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
     setLoading(true);
     setError(null);
     setFailedPasteCount(0);
     try {
-      const [pasteResult, attachmentResult] = await Promise.all([
-        requestApi("/api/pastes", PasteListResponse),
-        requestApi("/api/attachments", AttachmentListResponse),
-      ]);
-      const unlocked = await settledMap(pasteResult.pastes, 4, async (stored) => ({
-        stored,
-        ...(await decryptOwnedPaste(accountKey, stored)),
-      }));
-      const attachmentsByPaste = new Map<string, StoredAttachment[]>();
-      for (const attachment of attachmentResult.attachments) {
-        const current = attachmentsByPaste.get(attachment.pasteId) ?? [];
-        current.push(attachment);
-        attachmentsByPaste.set(attachment.pasteId, current);
-      }
-      const hydrated = await settledMap(unlocked.values, 4, async (paste) => {
-        const attachments = await unlockAttachments(attachmentsByPaste.get(paste.stored.id) ?? [], paste.pasteKey);
-        return {
-          ...paste,
-          attachments: attachments.values,
-          attachmentFailureCount: attachments.failureCount,
-        };
-      });
-      setPastes(hydrated.values);
-      const failureCount = unlocked.failureCount + hydrated.failureCount;
-      setFailedPasteCount(failureCount);
-      if (failureCount) {
-        setError(`${failureCount} encrypted ${failureCount === 1 ? "item could" : "items could"} not be decrypted.`);
+      const result = await browserRuntime.runPromise(
+        loadOwnedPastesEffect(accountKey),
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      setPastes(result.pastes);
+      setFailedPasteCount(result.failureCount);
+      if (result.failureCount) {
+        setError(`${result.failureCount} encrypted ${result.failureCount === 1 ? "item could" : "items could"} not be decrypted.`);
       }
     } catch (cause) {
-      setError(messageOf(cause));
+      if (!controller.signal.aborted) setError(messageOf(cause));
     } finally {
-      setLoading(false);
+      if (loadController.current === controller) loadController.current = null;
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [accountKey]);
 
   useEffect(() => {
-    loadPastes();
+    void loadPastes();
+    return () => loadController.current?.abort();
   }, [loadPastes]);
 
   async function deletePaste(paste: UnlockedPaste) {

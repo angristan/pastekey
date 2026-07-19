@@ -1,7 +1,7 @@
 import { Effect, Schedule, Schema } from "effect";
 
 import { ApiStatusError } from "../effect/api";
-import { ApiError } from "./api";
+import { runClientPromise } from "../effect/runtime";
 
 const MAX_UPLOAD_ATTEMPTS = 3;
 
@@ -30,10 +30,8 @@ export class UploadReconciliationError extends Schema.TaggedErrorClass<UploadRec
 const causeMessage = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
 
-const statusOf = (cause: unknown) => {
-  if (cause instanceof ApiStatusError || cause instanceof ApiError) return cause.status;
-  return undefined;
-};
+const statusOf = (cause: unknown) =>
+  cause instanceof ApiStatusError ? cause.status : undefined;
 
 const isRetryable = (cause: unknown) => {
   const status = statusOf(cause);
@@ -195,5 +193,5 @@ export function uploadWithRetry(
   headers: HeadersInit,
   callbacks: UploadCallbacks,
 ): Promise<void> {
-  return Effect.runPromise(uploadWithRetryEffect(path, body, headers, callbacks));
+  return runClientPromise(uploadWithRetryEffect(path, body, headers, callbacks));
 }

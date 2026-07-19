@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import { Effect, Fiber } from "effect";
 
 import { ApiStatusError } from "../../effect/api";
-import { ApiError } from "../../lib/api";
 import {
   createUploadPayloadCache,
   discardUploadSession,
@@ -142,13 +141,13 @@ describe("upload payload ownership", () => {
 
   it("treats an already removed unfinished item as discarded", async () => {
     await expect(discardUploadSession("paste", async () => {
-      throw new ApiError("Not found", 404);
+      throw ApiStatusError.make({ message: "Not found", status: 404 });
     })).resolves.toBeUndefined();
     await expect(discardUploadSession("paste", async () => {
       throw ApiStatusError.make({ message: "Not found", status: 404 });
     })).resolves.toBeUndefined();
     await expect(discardUploadSession("paste", async () => {
-      throw new ApiError("Unavailable", 503);
+      throw ApiStatusError.make({ message: "Unavailable", status: 503 });
     })).rejects.toMatchObject({ status: 503 });
   });
 

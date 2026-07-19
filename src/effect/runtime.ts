@@ -6,6 +6,12 @@ import type { WebAuthn } from "./webauthn";
 
 const apiRuntime = ManagedRuntime.make(ApiClientLive);
 
+/** Promise boundary for service-free browser effects and compatibility adapters. */
+export const runClientPromise = <A, E>(
+  effect: Effect.Effect<A, E>,
+  options?: Effect.RunOptions,
+): Promise<A> => Effect.runPromise(effect, options);
+
 type BrowserServices = ApiClient | BrowserCrypto | WebAuthn;
 
 const makeBrowserRuntime = async () => {

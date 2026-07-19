@@ -1,5 +1,7 @@
 import { Effect, Result, Schema } from "effect";
 
+import { runClientPromise } from "../effect/runtime";
+
 export class InvalidConcurrencyError extends Schema.TaggedErrorClass<InvalidConcurrencyError>()(
   "InvalidConcurrencyError",
   {
@@ -40,7 +42,7 @@ export function settledMap<T, U>(
   concurrency: number,
   map: (value: T, index: number) => Promise<U>,
 ): Promise<{ values: U[]; failureCount: number }> {
-  return Effect.runPromise(settledMapEffect(
+  return runClientPromise(settledMapEffect(
     values,
     concurrency,
     (value, index) => Effect.tryPromise(() => map(value, index)),

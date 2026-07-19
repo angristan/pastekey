@@ -10,13 +10,12 @@ import {
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Brand, GitHubLink } from "../../components/Brand";
 import { CenteredStatus } from "../../components/CenteredStatus";
-import { requestApi } from "../../effect/runtime";
+import { browserRuntime } from "../../effect/runtime";
 import type { UnlockedAttachment } from "../../lib/attachments";
-import { decryptSharedPaste } from "../../lib/crypto";
 import { formatDate, messageOf } from "../../lib/format";
 import { shareSecretFromHash } from "../../lib/routes";
-import { unlockAttachments } from "../pastes/useUnlockedAttachments";
-import { StoredShare } from "../../../shared/schema/pastes";
+import { loadSharedPasteEffect } from "../pastes/useUnlockedAttachments";
+import type { StoredShare } from "../../../shared/protocol/pastes";
 import { itemKindOf, type PastePayload } from "../../../shared/protocol/pastes";
 
 const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
@@ -36,20 +35,26 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
       setError("This link is missing its decryption key.");
       return;
     }
-    requestApi(`/api/shares/${shareId}`, StoredShare)
-      .then(async (stored) => {
-        setMetadata(stored);
-        const unlocked = await decryptSharedPaste(stored, secret);
-        setPayload(unlocked.payload);
-        const decryptedAttachments = await unlockAttachments(stored.attachments, unlocked.pasteKey);
-        setAttachments(decryptedAttachments.values);
-        if (decryptedAttachments.failureCount) {
-          setPanelError(
-            `${decryptedAttachments.failureCount} encrypted ${decryptedAttachments.failureCount === 1 ? "file could" : "files could"} not be decrypted.`,
-          );
-        }
-      })
-      .catch((cause) => setError(messageOf(cause)));
+
+    const controller = new AbortController();
+    void browserRuntime.runPromise(
+      loadSharedPasteEffect(shareId, secret),
+      { signal: controller.signal },
+    ).then((result) => {
+      if (controller.signal.aborted) return;
+      setMetadata(result.stored);
+      setPayload(result.payload);
+      setAttachments(result.attachments.values);
+      if (result.attachments.failureCount) {
+        setPanelError(
+          `${result.attachments.failureCount} encrypted ${result.attachments.failureCount === 1 ? "file could" : "files could"} not be decrypted.`,
+        );
+      }
+    }).catch((cause) => {
+      if (!controller.signal.aborted) setError(messageOf(cause));
+    });
+
+    return () => controller.abort();
   }, [secret, shareId]);
 
   async function copy() {

@@ -1,6 +1,6 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { DownloadSimpleIcon, EyeIcon, FileIcon, XIcon } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   attachmentPreviewKind,
@@ -66,6 +66,10 @@ function AttachmentRow({
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const mounted = useRef(true);
+  const previewController = useRef<AbortController | null>(null);
+  const downloadController = useRef<AbortController | null>(null);
+  const previewUrl = useRef<string | null>(null);
   const [preview, setPreview] = useState<{
     kind: AttachmentPreviewKind;
     text?: string;
@@ -74,55 +78,89 @@ function AttachmentRow({
   } | null>(null);
   const endpoint = downloadEndpoint(attachment);
 
-  useEffect(() => () => {
-    if (preview?.url) URL.revokeObjectURL(preview.url);
-  }, [preview?.url]);
-
-  async function togglePreview() {
-    if (preview) {
-      setPreview(null);
-      return;
+  function clearPreview() {
+    previewController.current?.abort();
+    previewController.current = null;
+    if (previewUrl.current) {
+      URL.revokeObjectURL(previewUrl.current);
+      previewUrl.current = null;
     }
-    if (!kind) return;
-
-    setLoadingPreview(true);
-    try {
-      const blob = await fetchDecryptedAttachment(endpoint, attachment);
-      if (kind === "text") {
-        const text = await blob.text();
-        const limit = 200_000;
-        setPreview({ kind, text: text.slice(0, limit), truncated: text.length > limit });
-      } else {
-        setPreview({ kind, url: URL.createObjectURL(blob) });
-      }
-    } catch (cause) {
-      onError(messageOf(cause));
-    } finally {
+    if (mounted.current) {
+      setPreview(null);
       setLoadingPreview(false);
     }
   }
 
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      previewController.current?.abort();
+      downloadController.current?.abort();
+      if (previewUrl.current) {
+        URL.revokeObjectURL(previewUrl.current);
+        previewUrl.current = null;
+      }
+    };
+  }, []);
+
+  async function togglePreview() {
+    if (preview) {
+      clearPreview();
+      return;
+    }
+    if (!kind) return;
+
+    previewController.current?.abort();
+    const controller = new AbortController();
+    previewController.current = controller;
+    setLoadingPreview(true);
+    try {
+      const blob = await fetchDecryptedAttachment(endpoint, attachment, { signal: controller.signal });
+      if (kind === "text") {
+        const text = await blob.text();
+        if (controller.signal.aborted || !mounted.current) return;
+        const limit = 200_000;
+        setPreview({ kind, text: text.slice(0, limit), truncated: text.length > limit });
+      } else {
+        if (controller.signal.aborted || !mounted.current) return;
+        const url = URL.createObjectURL(blob);
+        previewUrl.current = url;
+        setPreview({ kind, url });
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted && mounted.current) onError(messageOf(cause));
+    } finally {
+      if (previewController.current === controller) previewController.current = null;
+      if (!controller.signal.aborted && mounted.current) setLoadingPreview(false);
+    }
+  }
+
   async function download() {
+    downloadController.current?.abort();
+    const controller = new AbortController();
+    downloadController.current = controller;
     setDownloading(true);
     try {
-      await downloadAttachment(endpoint, attachment);
+      await downloadAttachment(endpoint, attachment, { signal: controller.signal });
     } catch (cause) {
-      onError(messageOf(cause));
+      if (!controller.signal.aborted && mounted.current) onError(messageOf(cause));
     } finally {
-      setDownloading(false);
+      if (downloadController.current === controller) downloadController.current = null;
+      if (!controller.signal.aborted && mounted.current) setDownloading(false);
     }
   }
 
   async function remove() {
     if (!onDelete) return;
     setDeleting(true);
-    setPreview(null);
+    clearPreview();
     try {
       await onDelete(attachment);
     } catch (cause) {
-      onError(messageOf(cause));
+      if (mounted.current) onError(messageOf(cause));
     } finally {
-      setDeleting(false);
+      if (mounted.current) setDeleting(false);
     }
   }
 

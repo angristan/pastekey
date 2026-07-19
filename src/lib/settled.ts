@@ -1,5 +1,7 @@
 import { Effect, Exit } from "effect";
 
+import { runClientPromise } from "../effect/runtime";
+
 export const settledValuesEffect = Effect.fn("settledValues")(function*<T, E, R>(
   effects: Iterable<Effect.Effect<T, E, R>>,
 ) {
@@ -25,5 +27,5 @@ export function settledValues<T>(
     promises,
     (promise) => Effect.tryPromise(() => promise),
   );
-  return Effect.runPromise(settledValuesEffect(effects));
+  return runClientPromise(settledValuesEffect(effects));
 }

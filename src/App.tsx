@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { CenteredStatus } from "./components/CenteredStatus";
 import { requestApi } from "./effect/runtime";
@@ -29,39 +29,63 @@ function VaultApp() {
   const [accountKey, setAccountKey] = useState<CryptoKey | null>(null);
   const [busy, setBusy] = useState<"register" | "unlock" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  const startupController = useRef<AbortController | null>(null);
+  const authController = useRef<AbortController | null>(null);
 
-  const refreshMe = useCallback(async () => {
-    setMe(await requestApi("/api/auth/me", MeResponse));
+  const refreshMe = useCallback(async (signal?: AbortSignal) => {
+    const response = await requestApi("/api/auth/me", MeResponse, { signal });
+    if (!signal?.aborted && mounted.current) setMe(response);
   }, []);
 
   const loadStartup = useCallback(async () => {
-    setError(null);
+    startupController.current?.abort();
+    const controller = new AbortController();
+    startupController.current = controller;
+    if (mounted.current) setError(null);
     try {
-      await Promise.all([
-        refreshMe(),
-        appConfig().then(setConfig),
+      const [, loadedConfig] = await Promise.all([
+        refreshMe(controller.signal),
+        appConfig(controller.signal),
       ]);
+      if (!controller.signal.aborted && mounted.current) setConfig(loadedConfig);
     } catch (cause) {
-      setError(messageOf(cause));
+      if (!controller.signal.aborted && mounted.current) setError(messageOf(cause));
+    } finally {
+      if (startupController.current === controller) startupController.current = null;
     }
   }, [refreshMe]);
 
   useEffect(() => {
+    mounted.current = true;
     void loadStartup();
+    return () => {
+      mounted.current = false;
+      startupController.current?.abort();
+      authController.current?.abort();
+    };
   }, [loadStartup]);
 
   async function authenticate(mode: "register" | "unlock", turnstileToken?: string) {
+    authController.current?.abort();
+    const controller = new AbortController();
+    authController.current = controller;
     setBusy(mode);
     setError(null);
     try {
       const { registerPasskey, unlockWithPasskey } = await import("./lib/passkeys");
-      const result = mode === "register" ? await registerPasskey(undefined, turnstileToken) : await unlockWithPasskey();
+      const options = { signal: controller.signal };
+      const result = mode === "register"
+        ? await registerPasskey(undefined, turnstileToken, options)
+        : await unlockWithPasskey(options);
+      if (controller.signal.aborted || !mounted.current) return;
       setAccountKey(result.accountKey);
-      await refreshMe();
+      await refreshMe(controller.signal);
     } catch (cause) {
-      setError(messageOf(cause));
+      if (!controller.signal.aborted && mounted.current) setError(messageOf(cause));
     } finally {
-      setBusy(null);
+      if (authController.current === controller) authController.current = null;
+      if (!controller.signal.aborted && mounted.current) setBusy(null);
     }
   }
 

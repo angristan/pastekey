@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { StoredAttachment } from "../../../shared/protocol/attachments";
 import { AttachmentListResponse, NoContentResponse } from "../../../shared/schema/api";
 import { ApiStatusError } from "../../effect/api";
-import { requestApi } from "../../effect/runtime";
-import { ApiError } from "../../lib/api";
+import { requestApi, runClientPromise } from "../../effect/runtime";
 import { encryptAttachment } from "../../lib/crypto";
 import { messageOf } from "../../lib/format";
 import { uploadWithRetry, uploadWithRetryEffect } from "../../lib/uploads";
@@ -56,7 +55,7 @@ const fromUploadPromise = <A>(operation: () => PromiseLike<A>) => Effect.tryProm
 });
 
 const compatibleApiError = (cause: unknown) => {
-  if (cause instanceof ApiError || cause instanceof ApiStatusError) return cause;
+  if (cause instanceof ApiStatusError) return cause;
   return UploadOperationError.make({
     message: causeMessage(cause, "Failed to discard the upload session."),
     cause,
@@ -64,7 +63,7 @@ const compatibleApiError = (cause: unknown) => {
 };
 
 const isMissingApiError = (cause: unknown) =>
-  (cause instanceof ApiError || cause instanceof ApiStatusError) && cause.status === 404;
+  cause instanceof ApiStatusError && cause.status === 404;
 
 const defaultDependencies: UploadDependencies = {
   encrypt: encryptAttachment,
@@ -227,7 +226,7 @@ export const uploadSelectedFileEffect = Effect.fn("uploadSelectedFile")(function
 
 /** Promise adapter retained for React event handlers. */
 export function uploadSelectedFile(input: UploadSelectedFileInput): Promise<boolean> {
-  return Effect.runPromise(uploadSelectedFileEffect(input));
+  return runClientPromise(uploadSelectedFileEffect(input));
 }
 
 export const uploadUntilFailureEffect: <E, R>(
@@ -260,7 +259,7 @@ export function uploadUntilFailure(
   files: readonly SelectedFile[],
   upload: (file: SelectedFile) => Promise<boolean>,
 ): Promise<{ attemptedIds: Set<string>; failedIds: Set<string> }> {
-  return Effect.runPromise(uploadUntilFailureEffect(
+  return runClientPromise(uploadUntilFailureEffect(
     files,
     (file) => fromUploadPromise(() => upload(file)),
   ));
@@ -282,7 +281,7 @@ export function discardUploadSession(
     await requestApi(`/api/pastes/${id}`, NoContentResponse, { method: "DELETE" });
   },
 ): Promise<void> {
-  return Effect.runPromise(discardUploadSessionEffect(
+  return runClientPromise(discardUploadSessionEffect(
     pasteId,
     (id) => Effect.tryPromise({
       try: () => remove(id),
