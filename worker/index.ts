@@ -82,15 +82,24 @@ export default {
   },
   scheduled(_controller, env, context) {
     context.waitUntil(isolateScheduledFailure(
-      runWorkerEffect(env, cleanupExpired()),
+      runWorkerEffect(env, cleanupExpired(), {
+        name: "pastekey.cleanup.expired",
+        trigger: "scheduled",
+      }),
       "Scheduled ciphertext cleanup failed",
     ));
     context.waitUntil(isolateScheduledFailure(
-      runWorkerEffect(env, reconcileAccountDeletionsEffect()),
+      runWorkerEffect(env, reconcileAccountDeletionsEffect(), {
+        name: "pastekey.account.deletion.reconcile",
+        trigger: "scheduled",
+      }),
       "Scheduled account deletion reconciliation failed",
     ));
     context.waitUntil(isolateScheduledFailure(
-      runWorkerEffect(env, recordLifecycleMetrics()),
+      runWorkerEffect(env, recordLifecycleMetrics(), {
+        name: "pastekey.lifecycle.metrics.record",
+        trigger: "scheduled",
+      }),
       "Scheduled lifecycle metrics failed",
     ));
   },

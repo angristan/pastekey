@@ -8,6 +8,10 @@ import {
   type R2FileStorageOperation,
 } from "../platform/cloudflare";
 import { D1, type D1Error, type D1Operation } from "../platform/d1";
+import {
+  traceWorkerOperation,
+  type WorkerQueueKind,
+} from "../lib/tracing";
 import { runWorkerEffect } from "../runtime";
 import type { Bindings, DeletionMessage } from "../types";
 
@@ -292,21 +296,36 @@ const processDeadLetter: (
   });
 
 /** Cloudflare Queue host adapter; message ack and retry stay outside Effect. */
-export async function consumeDeletionQueue(
+export function consumeDeletionQueue(
   batch: MessageBatch<unknown>,
   env: Bindings,
-) {
-  if (batch.queue === (env.DELETION_DLQ_NAME ?? DELETION_DLQ_NAME)) {
-    await consumeDeadLetters(batch, env);
-    return;
-  }
-  if (batch.queue === (env.DELETION_QUEUE_NAME ?? DELETION_QUEUE_NAME)) {
-    await consumePrimaryDeletions(batch, env);
-    return;
-  }
+): Promise<void> {
+  const deadLetterName = env.DELETION_DLQ_NAME ?? DELETION_DLQ_NAME;
+  const primaryName = env.DELETION_QUEUE_NAME ?? DELETION_QUEUE_NAME;
+  const queueKind: WorkerQueueKind = batch.queue === deadLetterName
+    ? "dead-letter"
+    : batch.queue === primaryName
+    ? "primary"
+    : "unknown";
 
-  console.error("Received ciphertext deletion messages from an unknown queue");
-  batch.retryAll({ delaySeconds: 300 });
+  return traceWorkerOperation({
+    name: "pastekey.deletion.queue.consume",
+    trigger: "queue",
+    queueKind,
+    batchSize: batch.messages.length,
+  }, async () => {
+    if (queueKind === "dead-letter") {
+      await consumeDeadLetters(batch, env);
+      return;
+    }
+    if (queueKind === "primary") {
+      await consumePrimaryDeletions(batch, env);
+      return;
+    }
+
+    console.error("Received ciphertext deletion messages from an unknown queue");
+    batch.retryAll({ delaySeconds: 300 });
+  });
 }
 
 async function consumePrimaryDeletions(

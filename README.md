@@ -49,7 +49,7 @@ Passkey PRF ──HKDF──> passkey wrapping key
 
 Pastekey does not protect against a compromised device, browser extension, dependency, or modified application JavaScript. Cloudflare and the network still observe normal request metadata, including IP-level traffic information and ciphertext sizes.
 
-D1 and R2 retain operational metadata such as opaque IDs, account/item/file counts, timestamps, expiration, and ciphertext sizes. Analytics Engine receives only fixed operation names, outcomes, coarse encrypted-file size buckets, duration, and HTTP status—never paths, identifiers, IP addresses, filenames, or content.
+D1 and R2 retain operational metadata such as opaque IDs, account/item/file counts, timestamps, expiration, and ciphertext sizes. Analytics Engine receives only fixed operation names, outcomes, coarse encrypted-file size buckets, duration, and HTTP status—never paths, identifiers, IP addresses, filenames, or content. Custom Worker spans likewise use fixed business-operation names and record only trigger type, queue kind, batch size, and failure state; Cloudflare's automatic tracing still observes normal platform request and binding metadata.
 
 Losing every passkey means losing the vault. There is no server-side recovery or password reset.
 

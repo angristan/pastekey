@@ -8,6 +8,7 @@ import {
   RegistrationVerifyRequest,
 } from "../../shared/schema/auth";
 import { relyingParty } from "../lib/config";
+import type { WorkerSpanOptions } from "../lib/tracing";
 import {
   decodeJsonBody,
   SMALL_JSON_BODY_BYTES,
@@ -49,6 +50,7 @@ type AuthExecution<A> =
 const runAuth = <A>(
   c: AppContext,
   effect: AuthOperation<A>,
+  span?: WorkerSpanOptions,
 ): Promise<AuthExecution<A>> =>
   runWorkerEffect(
     c.env,
@@ -57,6 +59,7 @@ const runAuth = <A>(
       Effect.catchTag("AuthError", (error) =>
         Effect.succeed({ ok: false, error } satisfies AuthExecution<A>)),
     ),
+    span,
   );
 
 export function createAuthRoutes(
@@ -118,14 +121,21 @@ export function createAuthRoutes(
     if (body === null) return c.json({ error: "Invalid registration response" }, 400);
 
     const { rpID, origin } = relyingParty(c);
-    const outcome = await runAuth(c, finishRegistration(verifiers, {
-      ceremony,
-      credential: body.credential,
-      wrappedAccountKey: body.wrappedAccountKey,
-      sessionToken: getCookie(c, SESSION_COOKIE),
-      rpID,
-      origin,
-    }));
+    const outcome = await runAuth(
+      c,
+      finishRegistration(verifiers, {
+        ceremony,
+        credential: body.credential,
+        wrappedAccountKey: body.wrappedAccountKey,
+        sessionToken: getCookie(c, SESSION_COOKIE),
+        rpID,
+        origin,
+      }),
+      {
+        name: "pastekey.auth.registration.verify",
+        trigger: "http",
+      },
+    );
     if (!outcome.ok) return c.json({ error: outcome.error.message }, outcome.error.status);
 
     deleteCookie(c, CEREMONY_COOKIE, { path: "/api/auth" });
@@ -159,12 +169,19 @@ export function createAuthRoutes(
     if (body === null) return c.json({ error: "Invalid sign-in response" }, 400);
 
     const { rpID, origin } = relyingParty(c);
-    const outcome = await runAuth(c, finishLogin(verifiers, {
-      ceremony,
-      credential: body.credential,
-      rpID,
-      origin,
-    }));
+    const outcome = await runAuth(
+      c,
+      finishLogin(verifiers, {
+        ceremony,
+        credential: body.credential,
+        rpID,
+        origin,
+      }),
+      {
+        name: "pastekey.auth.login.verify",
+        trigger: "http",
+      },
+    );
     if (!outcome.ok) return c.json({ error: outcome.error.message }, outcome.error.status);
 
     deleteCookie(c, CEREMONY_COOKIE, { path: "/api/auth" });

@@ -11,6 +11,10 @@ accountRoutes.delete("/api/account", requireRecentUser, async (c) => {
   const requested = await runWorkerEffect(
     c.env,
     requestAccountDeletion(c.get("userId")),
+    {
+      name: "pastekey.account.deletion.request",
+      trigger: "http",
+    },
   );
   if (!requested) return c.json({ error: "Account deletion is already in progress" }, 409);
 

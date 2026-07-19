@@ -13,6 +13,10 @@ import {
   rateLimiterLayer,
 } from "./platform/cloudflare";
 import { D1, layer as d1Layer } from "./platform/d1";
+import {
+  traceWorkerOperation,
+  type WorkerSpanOptions,
+} from "./lib/tracing";
 import type { Bindings } from "./types";
 
 export type WorkerServices =
@@ -40,8 +44,9 @@ export function workerLayer(env: Bindings): Layer.Layer<WorkerServices> {
 export function runWorkerEffect<A, E>(
   env: Bindings,
   effect: Effect.Effect<A, E, WorkerServices>,
+  span?: WorkerSpanOptions,
 ): Promise<A> {
-  return Effect.runPromise(
+  const run = () => Effect.runPromise(
     effect.pipe(
       Effect.provide(workerLayer(env)),
       Effect.result,
@@ -50,4 +55,5 @@ export function runWorkerEffect<A, E>(
     if (Result.isFailure(result)) throw result.failure;
     return result.success;
   });
+  return span === undefined ? run() : traceWorkerOperation(span, run);
 }

@@ -97,6 +97,10 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
           })),
       }),
     ),
+    {
+      name: "pastekey.attachment.upload",
+      trigger: "http",
+    },
   );
 
   switch (outcome.status) {
