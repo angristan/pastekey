@@ -97,6 +97,18 @@ export class WebAuthnError extends Schema.TaggedErrorClass<WebAuthnError>()(
 const causeMessage = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
 
+const operationMessage = (cause: unknown, fallback: string, canceled: string) => {
+  if (
+    typeof cause === "object"
+    && cause !== null
+    && "name" in cause
+    && cause.name === "NotAllowedError"
+  ) {
+    return canceled;
+  }
+  return causeMessage(cause, fallback);
+};
+
 export interface CredentialBase {
   readonly id: string;
   readonly rawId: ArrayBuffer;
@@ -131,7 +143,11 @@ export class WebAuthn extends Context.Service<WebAuthn, {
   ) => Effect.Effect<AuthenticationCredential, WebAuthnError>;
 }>()("pastekey/WebAuthn") {}
 
-const makeWebAuthn = () => WebAuthn.of({
+type WebAuthnCredentials = Pick<CredentialsContainer, "create" | "get">;
+
+export const makeWebAuthn = (
+  credentials?: WebAuthnCredentials,
+) => WebAuthn.of({
   assertSupported: Effect.fn("WebAuthn.assertSupported")(function*() {
     if (!globalThis.isSecureContext || !("PublicKeyCredential" in globalThis)) {
       return yield* WebAuthnError.make({
@@ -142,10 +158,17 @@ const makeWebAuthn = () => WebAuthn.of({
   }),
   create: Effect.fn("WebAuthn.create")(function*(options: PublicKeyCredentialCreationOptions) {
     const credential = yield* Effect.tryPromise({
-      try: () => globalThis.navigator.credentials.create({ publicKey: options }),
+      try: (signal) => (credentials ?? globalThis.navigator.credentials).create({
+        publicKey: options,
+        signal,
+      }),
       catch: (cause) => WebAuthnError.make({
         operation: "create-credential",
-        message: causeMessage(cause, "Passkey creation failed"),
+        message: operationMessage(
+          cause,
+          "Passkey creation failed",
+          "Passkey creation was canceled",
+        ),
         cause,
       }),
     });
@@ -171,10 +194,17 @@ const makeWebAuthn = () => WebAuthn.of({
   }),
   get: Effect.fn("WebAuthn.get")(function*(options: PublicKeyCredentialRequestOptions) {
     const credential = yield* Effect.tryPromise({
-      try: () => globalThis.navigator.credentials.get({ publicKey: options }),
+      try: (signal) => (credentials ?? globalThis.navigator.credentials).get({
+        publicKey: options,
+        signal,
+      }),
       catch: (cause) => WebAuthnError.make({
         operation: "get-credential",
-        message: causeMessage(cause, "Passkey sign-in failed"),
+        message: operationMessage(
+          cause,
+          "Passkey sign-in failed",
+          "Passkey sign-in was canceled",
+        ),
         cause,
       }),
     });
@@ -202,16 +232,22 @@ const makeWebAuthn = () => WebAuthn.of({
 
 export const WebAuthnLive = Layer.succeed(WebAuthn)(makeWebAuthn());
 
-const isBrowserTransport = (transport: typeof Transport.Type): transport is AuthenticatorTransport =>
-  transport !== "cable" && transport !== "smart-card";
-
-const credentialDescriptor = (descriptor: typeof CredentialDescriptorJson.Type): PublicKeyCredentialDescriptor => ({
-  id: fromBase64Url(descriptor.id),
-  type: descriptor.type,
-  ...(descriptor.transports === undefined
-    ? {}
-    : { transports: descriptor.transports.filter(isBrowserTransport) }),
-});
+const credentialDescriptors = (
+  descriptors: ReadonlyArray<typeof CredentialDescriptorJson.Type>,
+): PublicKeyCredentialDescriptor[] => {
+  const parsed = PublicKeyCredential.parseRequestOptionsFromJSON({
+    challenge: "AA",
+    allowCredentials: descriptors.map((descriptor) => ({
+      id: descriptor.id,
+      type: descriptor.type,
+      ...(descriptor.transports === undefined ? {} : { transports: descriptor.transports }),
+    })),
+  }).allowCredentials;
+  if (parsed === undefined || parsed.length !== descriptors.length) {
+    throw new Error("The browser could not convert the WebAuthn credential hints");
+  }
+  return parsed;
+};
 
 const extensions = (
   input: typeof ClientExtensionsJson.Type | undefined,
@@ -247,7 +283,7 @@ export function creationOptions(options: CreationOptionsJson): PublicKeyCredenti
     ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
     ...(options.excludeCredentials === undefined
       ? {}
-      : { excludeCredentials: options.excludeCredentials.map(credentialDescriptor) }),
+      : { excludeCredentials: credentialDescriptors(options.excludeCredentials) }),
     ...(options.authenticatorSelection === undefined
       ? {}
       : { authenticatorSelection: options.authenticatorSelection }),
@@ -268,7 +304,7 @@ export function requestOptions(options: RequestOptionsJson): PublicKeyCredential
     ...(options.rpId === undefined ? {} : { rpId: options.rpId }),
     ...(options.allowCredentials === undefined
       ? {}
-      : { allowCredentials: options.allowCredentials.map(credentialDescriptor) }),
+      : { allowCredentials: credentialDescriptors(options.allowCredentials) }),
     ...(options.userVerification === undefined ? {} : { userVerification: options.userVerification }),
     ...(options.hints === undefined ? {} : { hints: options.hints }),
     extensions: extensions(options.extensions),

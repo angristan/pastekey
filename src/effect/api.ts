@@ -86,13 +86,15 @@ export const makeApiClient = (fetchImplementation: FetchImplementation) => ApiCl
   request: <S extends Schema.ConstraintDecoder<unknown>>(path: string, schema: S, init?: RequestInit) =>
     Effect.gen(function* () {
       const response = yield* Effect.tryPromise({
-        try: (signal) => fetchImplementation(path, {
+        try: (effectSignal) => fetchImplementation(path, {
           ...init,
           headers: {
             ...(typeof init?.body === "string" ? { "Content-Type": "application/json" } : {}),
             ...init?.headers,
           },
-          signal,
+          signal: init?.signal == null
+            ? effectSignal
+            : AbortSignal.any([effectSignal, init.signal]),
         }),
         catch: (cause) => ApiTransportError.make({
           message: causeMessage(cause, "API request failed before receiving a response"),

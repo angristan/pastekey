@@ -8,6 +8,7 @@ import {
   makeApiClient,
   type FetchImplementation,
 } from "./api";
+import { requestApi } from "./runtime";
 
 const Result = Schema.Struct({ value: Schema.String });
 
@@ -98,6 +99,86 @@ describe("ApiClient", () => {
       assert.isTrue(observedSignal?.aborted);
     }),
   );
+
+  it.effect("aborts the fetch when the caller signal is aborted", () =>
+    Effect.gen(function* () {
+      const controller = new AbortController();
+      const abortCause = new Error("caller canceled");
+      let observedSignal: AbortSignal | undefined;
+      const client = makeApiClient((_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          observedSignal = signal ?? undefined;
+          if (signal === undefined || signal === null) {
+            reject(new Error("missing AbortSignal"));
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }));
+
+      const fiber = yield* Effect.forkChild(Effect.flip(client.request(
+        "/api/slow",
+        Result,
+        { signal: controller.signal },
+      )));
+      yield* Effect.yieldNow;
+      assert.isDefined(observedSignal);
+
+      controller.abort(abortCause);
+      const error = yield* Fiber.join(fiber);
+
+      assert.isTrue(observedSignal?.aborted);
+      assert.instanceOf(error, ApiTransportError);
+      assert.strictEqual(error.cause, abortCause);
+    }),
+  );
+
+  it("interrupts requestApi when its caller signal is aborted", async () => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | undefined;
+    let notifyStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          observedSignal = signal ?? undefined;
+          notifyStarted?.();
+          if (signal === undefined || signal === null) {
+            reject(new Error("missing AbortSignal"));
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    });
+
+    try {
+      const request = requestApi("/api/slow", Result, { signal: controller.signal });
+      await started;
+      controller.abort();
+
+      let rejected = false;
+      try {
+        await request;
+      } catch {
+        rejected = true;
+      }
+
+      assert.isTrue(rejected);
+      assert.isTrue(observedSignal?.aborted);
+    } finally {
+      if (previous === undefined) {
+        Reflect.deleteProperty(globalThis, "fetch");
+      } else {
+        Object.defineProperty(globalThis, "fetch", previous);
+      }
+    }
+  });
 
   it.effect("adds the JSON header for string bodies and preserves overrides", () =>
     Effect.gen(function* () {
