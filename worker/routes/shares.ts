@@ -1,9 +1,8 @@
 import { Hono } from "hono";
 
-import type { ShareWrite } from "../../shared/protocol/pastes";
+import { ShareWrite } from "../../shared/schema/pastes";
 import { streamR2Object } from "../lib/attachments-http";
-import { OPAQUE_ID } from "../lib/config";
-import { normalizeExpiry, readJson, SMALL_JSON_BODY_BYTES, validOpaque } from "../lib/http";
+import { decodeJsonBody, normalizeExpiry, SMALL_JSON_BODY_BYTES } from "../lib/http";
 import { runWorkerEffect } from "../runtime";
 import {
   createShare,
@@ -27,10 +26,11 @@ shareRoutes.get("/api/pastes/:id/shares", requireUser, async (c) => {
 });
 
 shareRoutes.post("/api/pastes/:id/shares", requireUser, async (c) => {
-  const body = await readJson<ShareWrite>(c, SMALL_JSON_BODY_BYTES);
-  if (!body || !OPAQUE_ID.test(body.id) || !validOpaque(body.wrappedKey) || !validOpaque(body.wrappedKeyIv)) {
-    return c.json({ error: "Invalid encrypted share" }, 400);
-  }
+  const body = await runWorkerEffect(
+    c.env,
+    decodeJsonBody(c, SMALL_JSON_BODY_BYTES, ShareWrite),
+  );
+  if (body === null) return c.json({ error: "Invalid encrypted share" }, 400);
 
   const createdAt = await runWorkerEffect(
     c.env,

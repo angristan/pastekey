@@ -102,6 +102,21 @@ describe("deletion queue failures", () => {
     expect(job).toEqual({ failureCycles: 1, queuedAt: null, nextAttemptAt: now + retryDelayMs(6) });
   });
 
+  it("accepts legacy messages without cycles and discards invalid payloads", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const batch = createMessageBatch<unknown>("pastekey-deletions", [
+      { id: "legacy-message", timestamp: new Date(), attempts: 1, body: { jobId } },
+      { id: "invalid-message", timestamp: new Date(), attempts: 1, body: { jobId, cycle: null } },
+    ]);
+    const context = createExecutionContext();
+
+    await consumeDeletionQueue(batch, bindings);
+    const result = await getQueueResult(batch, context);
+
+    expect(result.explicitAcks).toEqual(expect.arrayContaining(["legacy-message", "invalid-message"]));
+    expect(result.retryMessages).toHaveLength(0);
+  });
+
   it("honors deployment-configured queue names", async () => {
     const batch = createMessageBatch<DeletionMessage>("custom-deletions", [
       { id: "custom-message", timestamp: new Date(), attempts: 1, body: { jobId, cycle: 0 } },

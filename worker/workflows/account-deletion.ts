@@ -6,6 +6,7 @@ import {
   type WorkflowStepConfig,
 } from "cloudflare:workers";
 
+import { AccountDeletionPayload as AccountDeletionPayloadSchema } from "../../shared/schema/deletions";
 import { R2FileStorage } from "../platform/cloudflare";
 import { D1, type D1Statement } from "../platform/d1";
 import { runWorkerEffect } from "../runtime";
@@ -34,10 +35,14 @@ class AccountDeletionInvariantError extends Schema.TaggedErrorClass<AccountDelet
 
 export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, AccountDeletionPayload> {
   async run(event: Readonly<WorkflowEvent<AccountDeletionPayload>>, step: WorkflowStep) {
+    const payload = await runWorkerEffect(
+      this.env,
+      Schema.decodeUnknownEffect(AccountDeletionPayloadSchema)(event.payload),
+    );
     const ownsAccount = await step.do("verify deletion ownership", async () =>
       runWorkerEffect(
         this.env,
-        ownsAccountDeletion(event.payload.userId, event.instanceId),
+        ownsAccountDeletion(payload.userId, event.instanceId),
       ),
     );
     if (!ownsAccount) return { deleted: false };
@@ -48,7 +53,7 @@ export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, Accoun
       const deleted = await step.do(`delete ciphertext batch ${batch}`, STEP_CONFIG, async () =>
         runWorkerEffect(
           this.env,
-          deleteCiphertextBatch(event.payload.userId, event.instanceId),
+          deleteCiphertextBatch(payload.userId, event.instanceId),
         ),
       );
       if (deleted === 0) {
@@ -59,7 +64,7 @@ export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, Accoun
 
     if (!drained) {
       const remaining = await step.do("verify ciphertext drained", STEP_CONFIG, async () =>
-        runWorkerEffect(this.env, countDeletionTargets(event.payload.userId)),
+        runWorkerEffect(this.env, countDeletionTargets(payload.userId)),
       );
       drained = remaining === 0;
     }
@@ -68,7 +73,7 @@ export class AccountDeletionWorkflow extends WorkflowEntrypoint<Bindings, Accoun
     await step.do("delete account metadata", STEP_CONFIG, async () =>
       runWorkerEffect(
         this.env,
-        deleteAccountMetadata(event.payload.userId, event.instanceId),
+        deleteAccountMetadata(payload.userId, event.instanceId),
       ),
     );
 

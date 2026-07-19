@@ -1,5 +1,13 @@
 import type { Context } from "hono";
 
+import type {
+  AccountDeletionPayload as AccountDeletionPayloadSchema,
+  DeletionMessage as DeletionMessageSchema,
+} from "../shared/schema/deletions";
+
+export type AccountDeletionPayload = typeof AccountDeletionPayloadSchema.Encoded;
+export type DeletionMessage = typeof DeletionMessageSchema.Encoded;
+
 export type Bindings = {
   DB: D1Database;
   FILES: R2Bucket;
@@ -32,15 +40,6 @@ export type AppEnv = {
 };
 
 export type AppContext = Context<AppEnv>;
-
-export type DeletionMessage = {
-  jobId: string;
-  cycle?: number;
-};
-
-export type AccountDeletionPayload = {
-  userId: string;
-};
 
 export type DeletionJobRow = {
   id: string;

@@ -1,3 +1,7 @@
+import type {
+  AuthenticationResponseJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/server";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
@@ -11,11 +15,18 @@ import {
   ShareListResponse,
 } from "./api";
 import { AttachmentMetadata, StoredAttachment } from "./attachments";
-import { AuthSuccess, MeResponse, WrappedKey } from "./auth";
+import {
+  AuthSuccess,
+  LoginVerifyRequest,
+  MeResponse,
+  RegistrationVerifyRequest,
+  WrappedKey,
+} from "./auth";
 import { AppConfig } from "./config";
 import { AccountDeletionPayload, DeletionMessage } from "./deletions";
 import {
   PastePayload,
+  PasteUpdate,
   PasteWrite,
   ShareWrite,
   StoredPaste,
@@ -76,6 +87,52 @@ describe("authentication contracts", () => {
 
     expect(Schema.encodeUnknownSync(MeResponse)(Schema.decodeUnknownSync(MeResponse)(response))).toEqual(response);
   });
+
+  it("decodes structurally compatible WebAuthn verification requests", () => {
+    const registration = Schema.decodeUnknownSync(RegistrationVerifyRequest)({
+      credential: {
+        id: "credential-id",
+        rawId: "credential-id",
+        response: {
+          clientDataJSON: encoded,
+          attestationObject: encoded,
+          transports: ["internal", "hybrid"],
+        },
+        authenticatorAttachment: "platform",
+        clientExtensionResults: { credProps: { rk: true } },
+        type: "public-key",
+      },
+      wrappedAccountKey: { ciphertext: encoded, iv: encoded },
+    });
+    const login = Schema.decodeUnknownSync(LoginVerifyRequest)({
+      credential: {
+        id: "credential-id",
+        rawId: "credential-id",
+        response: {
+          clientDataJSON: encoded,
+          authenticatorData: encoded,
+          signature: encoded,
+        },
+        clientExtensionResults: {},
+        type: "public-key",
+      },
+    });
+
+    const registrationCredential: RegistrationResponseJSON = registration.credential;
+    const authenticationCredential: AuthenticationResponseJSON = login.credential;
+    expect(registrationCredential.response.transports).toEqual(["internal", "hybrid"]);
+    expect(authenticationCredential.id).toBe("credential-id");
+    expect(() => Schema.decodeUnknownSync(LoginVerifyRequest)({
+      credential: { ...login.credential, type: "password" },
+    })).toThrow();
+    expect(() => Schema.decodeUnknownSync(RegistrationVerifyRequest)({
+      credential: {
+        ...registration.credential,
+        response: { ...registration.credential.response, transports: ["carrier-pigeon"] },
+      },
+      wrappedAccountKey: registration.wrappedAccountKey,
+    })).toThrow();
+  });
 });
 
 describe("configuration contract", () => {
@@ -120,7 +177,11 @@ describe("paste and share contracts", () => {
     expect(Schema.encodeUnknownSync(PasteWrite)(Schema.decodeUnknownSync(PasteWrite)({ ...paste, expiresAt: null })))
       .toEqual({ ...paste, expiresAt: null });
     expect(Schema.encodeUnknownSync(ShareWrite)(Schema.decodeUnknownSync(ShareWrite)(share))).toEqual(share);
+    expect(Schema.decodeUnknownSync(PasteUpdate)({ ...paste, id: undefined }).ciphertext).toBe(encoded);
     expect(() => Schema.decodeUnknownSync(PasteWrite)({ ...paste, expiresAt: undefined })).toThrow();
+    expect(() => Schema.decodeUnknownSync(PasteWrite)({ ...paste, ciphertext: "A".repeat(1_000_001) })).toThrow();
+    expect(() => Schema.decodeUnknownSync(PasteUpdate)({ ...paste, id: undefined, wrappedKey: "A".repeat(10_001) }))
+      .toThrow();
   });
 
   it("round-trips stored paste and share shapes", () => {

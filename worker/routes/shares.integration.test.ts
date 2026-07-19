@@ -9,6 +9,8 @@ const bindings = env as unknown as Bindings;
 const userId = "shareuser1234567890123";
 const pasteId = "sharepaste123456789012";
 const shareId = "sharelink1234567890123";
+const fileId = "sharefile1234567890123";
+const objectKey = `${userId}/${pasteId}/${fileId}`;
 const token = "test-session-token-for-shares";
 const authHeaders = { Cookie: `pk_session=${token}` };
 
@@ -28,6 +30,7 @@ describe("share-link routes", () => {
   });
 
   afterEach(async () => {
+    await bindings.FILES.delete(objectKey);
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
   });
 
@@ -54,6 +57,33 @@ describe("share-link routes", () => {
       headers: authHeaders,
     });
     expect(revoke.status).toBe(404);
+  });
+
+  it("streams encrypted shared attachments through the Worker runtime", async () => {
+    const now = Date.now();
+    const ciphertext = new Uint8Array(32).fill(7);
+    await bindings.DB.batch([
+      bindings.DB.prepare(
+        "INSERT INTO shares (id, paste_id, wrapped_key, wrapped_key_iv, created_at, expires_at) VALUES (?, ?, 'AA', 'AA', ?, NULL)",
+      ).bind(shareId, pasteId, now),
+      bindings.DB.prepare(
+        `INSERT INTO attachments (
+          id, paste_id, object_key, ciphertext_size, content_iv, wrapped_key,
+          wrapped_key_iv, metadata_ciphertext, metadata_iv, created_at
+        ) VALUES (?, ?, ?, ?, 'AA', 'AA', 'AA', 'AA', 'AA', ?)`,
+      ).bind(fileId, pasteId, objectKey, ciphertext.byteLength, now),
+    ]);
+    await bindings.FILES.put(objectKey, ciphertext);
+
+    const response = await SELF.fetch(
+      `https://paste.test/api/shares/${shareId}/files/${fileId}/content`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(ciphertext);
   });
 
   it("creates, lists, reads, and revokes an encrypted link", async () => {

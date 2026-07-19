@@ -1,11 +1,23 @@
+import { Effect } from "effect";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import { readJson, RequestBodyTooLargeError } from "./http";
+import { runWorkerEffect } from "../runtime";
 import type { AppEnv, Bindings } from "../types";
 
 const app = new Hono<AppEnv>();
-app.post("/", async (c) => c.json({ value: await readJson(c, 16) }));
+app.post("/", async (c) => c.json({
+  value: await runWorkerEffect(
+    c.env,
+    readJson(c, 16).pipe(
+      Effect.catchTags({
+        RequestBodyReadError: () => Effect.succeed(null),
+        RequestBodyParseError: () => Effect.succeed(null),
+      }),
+    ),
+  ),
+}));
 app.onError((error, c) => error instanceof RequestBodyTooLargeError
   ? c.json({ error: "Request body too large" }, 413)
   : c.json({ error: "Unexpected" }, 500));

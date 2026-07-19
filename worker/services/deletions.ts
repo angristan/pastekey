@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 
-import { OPAQUE_ID } from "../lib/config";
+import { DeletionMessage as DeletionMessageSchema } from "../../shared/schema/deletions";
 import { DeletionQueue, R2FileStorage } from "../platform/cloudflare";
 import { D1 } from "../platform/d1";
 import { runWorkerEffect } from "../runtime";
@@ -209,7 +209,7 @@ const rescheduleDeadLetter = Effect.fn("Deletions.rescheduleDeadLetter")(
 
 /** Cloudflare Queue host adapter; message ack and retry stay outside Effect. */
 export async function consumeDeletionQueue(
-  batch: MessageBatch<DeletionMessage>,
+  batch: MessageBatch<unknown>,
   env: Bindings,
 ) {
   if (batch.queue === (env.DELETION_DLQ_NAME ?? DELETION_DLQ_NAME)) {
@@ -226,18 +226,19 @@ export async function consumeDeletionQueue(
 }
 
 async function consumePrimaryDeletions(
-  batch: MessageBatch<DeletionMessage>,
+  batch: MessageBatch<unknown>,
   env: Bindings,
 ) {
   for (const message of batch.messages) {
-    if (!validMessage(message.body)) {
+    const body = await decodeDeletionMessage(message.body, env);
+    if (body === null) {
       console.error("Discarding invalid ciphertext deletion message");
       message.ack();
       continue;
     }
 
     try {
-      await runWorkerEffect(env, deleteQueuedCiphertext(message.body.jobId));
+      await runWorkerEffect(env, deleteQueuedCiphertext(body.jobId));
       message.ack();
     } catch {
       console.error("Queued ciphertext deletion failed", {
@@ -249,18 +250,19 @@ async function consumePrimaryDeletions(
 }
 
 async function consumeDeadLetters(
-  batch: MessageBatch<DeletionMessage>,
+  batch: MessageBatch<unknown>,
   env: Bindings,
 ) {
   for (const message of batch.messages) {
-    if (!validMessage(message.body)) {
+    const body = await decodeDeletionMessage(message.body, env);
+    if (body === null) {
       console.error("Discarding invalid ciphertext deletion dead letter");
       message.ack();
       continue;
     }
 
     try {
-      const scheduled = await runWorkerEffect(env, rescheduleDeadLetter(message.body));
+      const scheduled = await runWorkerEffect(env, rescheduleDeadLetter(body));
       if (scheduled !== null) {
         console.error("Ciphertext deletion scheduled for another retry cycle", scheduled);
       }
@@ -274,14 +276,15 @@ async function consumeDeadLetters(
   }
 }
 
-function validMessage(
-  value: DeletionMessage | null | undefined,
-): value is DeletionMessage {
-  return Boolean(
-    value &&
-      OPAQUE_ID.test(value.jobId) &&
-      (value.cycle === undefined ||
-        (Number.isSafeInteger(value.cycle) && value.cycle >= 0)),
+function decodeDeletionMessage(value: unknown, env: Bindings) {
+  return runWorkerEffect(
+    env,
+    Schema.decodeUnknownEffect(DeletionMessageSchema)(value).pipe(
+      Effect.match({
+        onFailure: () => null,
+        onSuccess: (message) => message,
+      }),
+    ),
   );
 }
 

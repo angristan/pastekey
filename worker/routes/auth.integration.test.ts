@@ -33,6 +33,42 @@ describe("authentication ceremonies", () => {
     registrationVerifier.mockReset();
   });
 
+  it("rejects malformed and structurally invalid ceremony payloads", async () => {
+    const malformed = await request("/api/auth/register/options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{bad",
+    });
+    expect(malformed.status).toBe(400);
+
+    const options = await request("/api/auth/register/options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const registration = await request("/api/auth/register/verify", {
+      method: "POST",
+      headers: { Cookie: ceremonyCookie(options), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        credential: { id: credentialId },
+        wrappedAccountKey: { ciphertext: "AA", iv: "AA" },
+      }),
+    });
+    expect(registration.status).toBe(400);
+    await expect(registration.json()).resolves.toEqual({ error: "Invalid registration response" });
+    expect(registrationVerifier).not.toHaveBeenCalled();
+
+    const loginOptions = await request("/api/auth/login/options", { method: "POST" });
+    const login = await request("/api/auth/login/verify", {
+      method: "POST",
+      headers: { Cookie: ceremonyCookie(loginOptions), "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: { id: credentialId } }),
+    });
+    expect(login.status).toBe(400);
+    await expect(login.json()).resolves.toEqual({ error: "Invalid sign-in response" });
+    expect(authenticationVerifier).not.toHaveBeenCalled();
+  });
+
   it("registers, consumes the ceremony once, and logs in", async () => {
     const options = await request("/api/auth/register/options", {
       method: "POST",

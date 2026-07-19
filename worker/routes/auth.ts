@@ -1,15 +1,15 @@
-import type {
-  AuthenticationResponseJSON,
-  RegistrationResponseJSON,
-} from "@simplewebauthn/server";
 import { Effect } from "effect";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
-import type { WrappedKey } from "../../shared/protocol/auth";
+import {
+  LoginVerifyRequest,
+  RegistrationOptionsRequest,
+  RegistrationVerifyRequest,
+} from "../../shared/schema/auth";
 import { relyingParty } from "../lib/config";
 import {
-  readJson,
+  decodeJsonBody,
   SMALL_JSON_BODY_BYTES,
   WEBAUTHN_JSON_BODY_BYTES,
 } from "../lib/http";
@@ -29,7 +29,6 @@ import {
   startAdditionalPasskeyRegistration,
   startInitialRegistration,
   startLogin,
-  validWrappedKey,
 } from "../services/auth-service";
 import { CEREMONY_TTL_SECONDS } from "../services/auth-ceremonies";
 import {
@@ -72,12 +71,17 @@ export function createAuthRoutes(
       return c.json({ error: availability.error.message }, availability.error.status);
     }
 
-    const body = await readJson<{ turnstileToken?: string }>(c, SMALL_JSON_BODY_BYTES);
+    const body = await runWorkerEffect(
+      c.env,
+      decodeJsonBody(c, SMALL_JSON_BODY_BYTES, RegistrationOptionsRequest),
+    );
+    if (body === null) return c.json({ error: "Invalid registration request" }, 400);
+
     const { rpID } = relyingParty(c);
     const outcome = await runAuth(c, startInitialRegistration({
       requestUrl: c.req.url,
       secretKey: c.env.TURNSTILE_SECRET_KEY,
-      turnstileToken: body?.turnstileToken,
+      turnstileToken: body.turnstileToken,
       remoteIp: c.req.header("CF-Connecting-IP"),
       turnstileRpID: c.env.RP_ID,
       rpID,
@@ -107,13 +111,11 @@ export function createAuthRoutes(
     );
     if (!ceremony) return c.json({ error: "Registration ceremony expired" }, 400);
 
-    const body = await readJson<{
-      credential: RegistrationResponseJSON;
-      wrappedAccountKey: WrappedKey;
-    }>(c, WEBAUTHN_JSON_BODY_BYTES);
-    if (!body || !validWrappedKey(body.wrappedAccountKey)) {
-      return c.json({ error: "Invalid registration response" }, 400);
-    }
+    const body = await runWorkerEffect(
+      c.env,
+      decodeJsonBody(c, WEBAUTHN_JSON_BODY_BYTES, RegistrationVerifyRequest),
+    );
+    if (body === null) return c.json({ error: "Invalid registration response" }, 400);
 
     const { rpID, origin } = relyingParty(c);
     const outcome = await runAuth(c, finishRegistration(verifiers, {
@@ -150,8 +152,11 @@ export function createAuthRoutes(
     );
     if (!ceremony) return c.json({ error: "Sign-in ceremony expired" }, 400);
 
-    const body = await readJson<{ credential: AuthenticationResponseJSON }>(c, WEBAUTHN_JSON_BODY_BYTES);
-    if (!body?.credential?.id) return c.json({ error: "Invalid sign-in response" }, 400);
+    const body = await runWorkerEffect(
+      c.env,
+      decodeJsonBody(c, WEBAUTHN_JSON_BODY_BYTES, LoginVerifyRequest),
+    );
+    if (body === null) return c.json({ error: "Invalid sign-in response" }, 400);
 
     const { rpID, origin } = relyingParty(c);
     const outcome = await runAuth(c, finishLogin(verifiers, {
