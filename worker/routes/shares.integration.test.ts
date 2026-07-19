@@ -95,6 +95,14 @@ describe("share-link routes", () => {
     expect(create.status).toBe(201);
     await expect(create.json()).resolves.toMatchObject({ id: shareId });
 
+    const duplicate = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/shares`, {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: shareId, wrappedKey: "AA", wrappedKeyIv: "AA", expiresAt: null }),
+    });
+    expect(duplicate.status).toBe(409);
+    await expect(duplicate.json()).resolves.toEqual({ error: "Share ID already exists" });
+
     const list = await SELF.fetch(`https://paste.test/api/pastes/${pasteId}/shares`, { headers: authHeaders });
     expect(list.status).toBe(200);
     await expect(list.json()).resolves.toMatchObject({ shares: [{ id: shareId, expiresAt: null }] });

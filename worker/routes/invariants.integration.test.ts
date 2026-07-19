@@ -1,8 +1,11 @@
 import { env } from "cloudflare:workers";
 import { SELF } from "cloudflare:test";
+import { Effect, Result } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { hashToken } from "../lib/encoding";
+import { runWorkerEffect } from "../runtime";
+import { createPaste } from "../services/paste-mutations";
 import type { Bindings } from "../types";
 
 const bindings = env as unknown as Bindings;
@@ -86,6 +89,26 @@ describe("concurrent account invariants", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "Item ID already exists" });
+
+    const serviceResult = await runWorkerEffect(
+      bindings,
+      createPaste(userId, {
+        id: pasteId,
+        ciphertext: "AQ",
+        contentIv: "AQ",
+        wrappedKey: "AQ",
+        wrappedKeyIv: "AQ",
+        expiresAt: null,
+      }, 100).pipe(Effect.result),
+    );
+    expect(Result.isFailure(serviceResult)).toBe(true);
+    if (Result.isFailure(serviceResult)) {
+      expect(serviceResult.failure).toMatchObject({
+        _tag: "DomainConflictError",
+        message: "Item ID already exists",
+        cause: { _tag: "D1Error", operation: "run" },
+      });
+    }
   });
 
   it("does not revive an expired item through update", async () => {

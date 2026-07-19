@@ -1,4 +1,22 @@
+import { Schema } from "effect";
+
 export type ApiErrorStatus = 409 | 503;
+
+export class DomainConflictError extends Schema.TaggedErrorClass<DomainConflictError>()(
+  "DomainConflictError",
+  {
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
+export class DomainUnavailableError extends Schema.TaggedErrorClass<DomainUnavailableError>()(
+  "DomainUnavailableError",
+  {
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
 
 export class ApiHttpError extends Error {
   constructor(
@@ -12,17 +30,6 @@ export class ApiHttpError extends Error {
   }
 
   readonly report: boolean;
-}
-
-export function throwUniqueConflict(cause: unknown, message: string): never {
-  if (isD1UniqueConstraint(cause)) {
-    throw new ApiHttpError(409, message, { cause });
-  }
-  throw cause;
-}
-
-export function serviceUnavailable(message: string, cause: unknown) {
-  return new ApiHttpError(503, message, { cause, report: true });
 }
 
 export function isD1UniqueConstraint(cause: unknown) {

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { Effect, Result } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runWorkerEffect } from "../runtime";
@@ -33,6 +34,58 @@ describe("attachment upload finalization", () => {
     await bindings.FILES.delete(objectKey);
     await bindings.DB.prepare("DELETE FROM deletion_jobs WHERE owner_id = ?").bind(userId).run();
     await bindings.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+  });
+
+  it("returns typed unavailability when ciphertext storage fails", async () => {
+    const storageCause = new Error("R2 unavailable");
+    const unavailableFiles = new Proxy(bindings.FILES, {
+      get(target, property) {
+        if (property === "put") {
+          return async () => {
+            throw storageCause;
+          };
+        }
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    let deletionDispatched = false;
+
+    const result = await runWorkerEffect(
+      { ...bindings, FILES: unavailableFiles },
+      uploadAttachment(
+        {
+          pasteId,
+          fileId,
+          ownerId: userId,
+          objectKey,
+          ciphertextSize: 32,
+          body: new Blob([new Uint8Array(32)]).stream(),
+          headers: {
+            contentIv: "AA",
+            wrappedKey: "AA",
+            wrappedKeyIv: "AA",
+            metadataCiphertext: "AA",
+            metadataIv: "AA",
+          },
+          limits: { maxFilesPerPaste: 10, maxStorageBytes: 1_024 },
+        },
+        () => {
+          deletionDispatched = true;
+        },
+      ).pipe(Effect.result),
+    );
+
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
+        _tag: "DomainUnavailableError",
+        message: "Encrypted attachment upload failed",
+        cause: { _tag: "R2FileStorageError", operation: "put", cause: storageCause },
+      });
+    }
+    expect(deletionDispatched).toBe(true);
+    expect(await bindings.FILES.get(objectKey)).toBeNull();
   });
 
   it("keeps ciphertext when D1 commits but loses the finalize response", async () => {

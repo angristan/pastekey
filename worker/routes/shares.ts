@@ -1,7 +1,9 @@
+import { Effect } from "effect";
 import { Hono } from "hono";
 
 import { ShareWrite } from "../../shared/schema/pastes";
 import { streamAttachmentObject } from "../lib/attachments-http";
+import { ApiHttpError } from "../lib/errors";
 import { decodeJsonBody, normalizeExpiry, SMALL_JSON_BODY_BYTES } from "../lib/http";
 import { runWorkerEffect } from "../runtime";
 import {
@@ -39,6 +41,9 @@ shareRoutes.post("/api/pastes/:id/shares", requireUser, async (c) => {
       c.get("userId"),
       body,
       normalizeExpiry(body.expiresAt),
+    ).pipe(
+      Effect.catchTag("DomainConflictError", (error) =>
+        Effect.fail(new ApiHttpError(409, error.message, { cause: error.cause }))),
     ),
   );
   if (createdAt === null) return c.json({ error: "Item not found" }, 404);

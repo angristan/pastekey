@@ -1,7 +1,9 @@
+import { Effect } from "effect";
 import { Hono } from "hono";
 
 import { PasteUpdate, PasteWrite } from "../../shared/schema/pastes";
 import { OPAQUE_ID, serviceLimits } from "../lib/config";
+import { ApiHttpError } from "../lib/errors";
 import { decodeJsonBody, PASTE_JSON_BODY_BYTES, validExpiry } from "../lib/http";
 import { findActiveOwnedPaste, listActiveOwnedPastes } from "../repositories/pastes";
 import { runWorkerEffect } from "../runtime";
@@ -44,6 +46,9 @@ pasteRoutes.post("/api/pastes", requireUser, async (c) => {
       c.get("userId"),
       body,
       serviceLimits(c.env).maxPastesPerUser,
+    ).pipe(
+      Effect.catchTag("DomainConflictError", (error) =>
+        Effect.fail(new ApiHttpError(409, error.message, { cause: error.cause }))),
     ),
   );
   if (outcome.status === "account-unavailable") {

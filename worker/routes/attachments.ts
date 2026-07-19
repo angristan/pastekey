@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { Hono } from "hono";
 
 import { OPAQUE_ID, serviceLimits } from "../lib/config";
+import { ApiHttpError } from "../lib/errors";
 import { readAttachmentHeaders, streamAttachmentObject } from "../lib/attachments-http";
 import { listActiveOwnedAttachments } from "../repositories/attachments";
 import { runWorkerEffect } from "../runtime";
@@ -85,6 +86,16 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
         limits,
       },
       () => deferDeletionDispatch(c),
+    ).pipe(
+      Effect.catchTags({
+        DomainConflictError: (error) =>
+          Effect.fail(new ApiHttpError(409, error.message, { cause: error.cause })),
+        DomainUnavailableError: (error) =>
+          Effect.fail(new ApiHttpError(503, error.message, {
+            cause: error.cause,
+            report: true,
+          })),
+      }),
     ),
   );
 

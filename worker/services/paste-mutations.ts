@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 
 import type { PasteWrite, ShareWrite } from "../../shared/protocol/pastes";
-import { ApiHttpError, isD1UniqueConstraint } from "../lib/errors";
+import { DomainConflictError, isD1UniqueConstraint } from "../lib/errors";
 import { D1, type D1Error } from "../platform/d1";
 import {
   deletePasteShare,
@@ -21,7 +21,7 @@ export type CreatePasteOutcome =
 
 const mapUniqueConflict = (message: string) => (error: D1Error) =>
   isD1UniqueConstraint(error.cause)
-    ? new ApiHttpError(409, message, { cause: error.cause })
+    ? DomainConflictError.make({ message, cause: error })
     : error;
 
 export const createPaste = Effect.fn("PasteMutations.createPaste")(

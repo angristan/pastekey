@@ -1,7 +1,11 @@
 import { Effect, Result } from "effect";
 
 import type { AttachmentHeaders } from "../lib/attachments-http";
-import { ApiHttpError, isD1UniqueConstraint, serviceUnavailable } from "../lib/errors";
+import {
+  DomainConflictError,
+  DomainUnavailableError,
+  isD1UniqueConstraint,
+} from "../lib/errors";
 import {
   R2FileStorage,
   type R2FileValue,
@@ -44,7 +48,7 @@ export type AttachmentDeleteOutcome =
 
 const mapUniqueConflict = (message: string) => (error: D1Error) =>
   isD1UniqueConstraint(error.cause)
-    ? new ApiHttpError(409, message, { cause: error.cause })
+    ? DomainConflictError.make({ message, cause: error })
     : error;
 
 const ignoreFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -130,7 +134,10 @@ export const uploadAttachment = Effect.fn("AttachmentUpload.uploadAttachment")(
     if (Result.isFailure(uploaded)) {
       yield* cleanupRejectedUpload(input.fileId, input.objectKey, deferDeletionDispatch);
       return yield* Effect.fail(
-        serviceUnavailable("Encrypted attachment upload failed", uploaded.failure.cause),
+        DomainUnavailableError.make({
+          message: "Encrypted attachment upload failed",
+          cause: uploaded.failure,
+        }),
       );
     }
 
