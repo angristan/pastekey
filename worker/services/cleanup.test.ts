@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { createExecutionContext, createMessageBatch, getQueueResult } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { runWorkerEffect } from "../runtime";
 import { cleanupExpired, findCleanupCandidates, stageCleanupCandidates } from "./cleanup";
 import { consumeDeletionQueue } from "./deletions";
 import type { Bindings, DeletionMessage } from "../types";
@@ -37,12 +38,12 @@ describe("expired ciphertext cleanup", () => {
       ).bind(fileId, pasteId, objectKey, now),
     ]);
 
-    const candidates = await findCleanupCandidates(bindings.DB, now);
+    const candidates = await runWorkerEffect(bindings, findCleanupCandidates(now));
     expect(candidates.attachmentIds).toContain(fileId);
     await bindings.DB.prepare("UPDATE pastes SET expires_at = ? WHERE id = ?")
       .bind(now + 60_000, pasteId)
       .run();
-    await stageCleanupCandidates(bindings.DB, candidates, now);
+    await runWorkerEffect(bindings, stageCleanupCandidates(candidates, now));
 
     expect(await bindings.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first()).not.toBeNull();
     expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(fileId).first()).toBeNull();
@@ -61,7 +62,7 @@ describe("expired ciphertext cleanup", () => {
     await bindings.DB.batch(statements.slice(0, 100));
     await bindings.DB.batch(statements.slice(100));
 
-    await cleanupExpired(bindings);
+    await runWorkerEffect(bindings, cleanupExpired());
 
     const reservations = await bindings.DB.prepare(
       "SELECT COUNT(*) AS count FROM upload_reservations WHERE owner_id = ?",
@@ -86,7 +87,7 @@ describe("expired ciphertext cleanup", () => {
       .run();
     await bindings.FILES.put(objectKey, new Uint8Array(32));
 
-    await cleanupExpired(bindings);
+    await runWorkerEffect(bindings, cleanupExpired());
 
     expect(await bindings.DB.prepare("SELECT id FROM upload_reservations WHERE id = ?").bind(fileId).first()).toBeNull();
     expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(fileId).first()).not.toBeNull();
@@ -120,7 +121,7 @@ describe("expired ciphertext cleanup", () => {
     ]);
     await bindings.FILES.put(objectKey, new Uint8Array(32));
 
-    await cleanupExpired(bindings);
+    await runWorkerEffect(bindings, cleanupExpired());
 
     expect(await bindings.DB.prepare("SELECT id FROM pastes WHERE id = ?").bind(pasteId).first()).toBeNull();
     const job = await bindings.DB.prepare("SELECT queued_at AS queuedAt FROM deletion_jobs WHERE id = ?")

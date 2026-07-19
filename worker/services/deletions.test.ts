@@ -2,9 +2,10 @@ import { env } from "cloudflare:workers";
 import { createExecutionContext, createMessageBatch, getQueueResult } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { runWorkerEffect } from "../runtime";
 import {
   consumeDeletionQueue,
-  enqueuePendingDeletions,
+  dispatchPendingAttachmentDeletions,
   recoverStaleDeletions,
   retryDelayMs,
 } from "./deletions";
@@ -74,7 +75,10 @@ describe("deletion queue failures", () => {
     expect(job).toMatchObject({ failureCycles: 1, queuedAt: null });
     expect(job!.lastFailedAt).toEqual(expect.any(Number));
     expect(job!.nextAttemptAt).toBeGreaterThanOrEqual(now + retryDelayMs(1));
-    expect(await enqueuePendingDeletions(bindings, now + 30 * 60 * 1_000)).toBe(0);
+    expect(await runWorkerEffect(
+      bindings,
+      dispatchPendingAttachmentDeletions(now + 30 * 60 * 1_000),
+    )).toBe(0);
   });
 
   it("recovers dispatches that outlive Queue retention", async () => {
@@ -87,7 +91,7 @@ describe("deletion queue failures", () => {
       .bind(jobId, ownerId, objectKey, 32, now - 26 * 60 * 60 * 1_000, now - 26 * 60 * 60 * 1_000)
       .run();
 
-    expect(await recoverStaleDeletions(bindings.DB, now)).toBe(1);
+    expect(await runWorkerEffect(bindings, recoverStaleDeletions(now))).toBe(1);
     const job = await bindings.DB.prepare(
       `SELECT failure_cycles AS failureCycles, queued_at AS queuedAt,
         next_attempt_at AS nextAttemptAt FROM deletion_jobs WHERE id = ?`,

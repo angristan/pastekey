@@ -12,7 +12,8 @@ import { attachmentRoutes } from "./routes/attachments";
 import { authRoutes } from "./routes/auth";
 import { pasteRoutes } from "./routes/pastes";
 import { shareRoutes } from "./routes/shares";
-import { reconcileAccountDeletions } from "./services/account-deletions";
+import { runWorkerEffect } from "./runtime";
+import { reconcileAccountDeletionsEffect } from "./services/account-deletions";
 import { cleanupExpired } from "./services/cleanup";
 import { consumeDeletionQueue } from "./services/deletions";
 import { recordLifecycleMetrics } from "./services/lifecycle-metrics";
@@ -80,8 +81,25 @@ export default {
     return consumeDeletionQueue(batch, env);
   },
   scheduled(_controller, env, context) {
-    context.waitUntil(cleanupExpired(env));
-    context.waitUntil(reconcileAccountDeletions(env));
-    context.waitUntil(recordLifecycleMetrics(env));
+    context.waitUntil(isolateScheduledFailure(
+      runWorkerEffect(env, cleanupExpired()),
+      "Scheduled ciphertext cleanup failed",
+    ));
+    context.waitUntil(isolateScheduledFailure(
+      runWorkerEffect(env, reconcileAccountDeletionsEffect()),
+      "Scheduled account deletion reconciliation failed",
+    ));
+    context.waitUntil(isolateScheduledFailure(
+      runWorkerEffect(env, recordLifecycleMetrics()),
+      "Scheduled lifecycle metrics failed",
+    ));
   },
 } satisfies ExportedHandler<Bindings, DeletionMessage>;
+
+async function isolateScheduledFailure(task: Promise<unknown>, message: string) {
+  try {
+    await task;
+  } catch (error) {
+    console.error(message, error);
+  }
+}

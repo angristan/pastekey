@@ -1,28 +1,43 @@
-import type { Bindings } from "../types";
+import { Effect, Schema } from "effect";
 
-type LifecycleSnapshot = {
-  deletionCount: number;
-  oldestDeletionAt: number | null;
-  expiredReservationCount: number;
-  recoveryAccountCount: number;
-};
+import { AnalyticsEngine } from "../platform/cloudflare";
+import { D1 } from "../platform/d1";
 
-export async function recordLifecycleMetrics(env: Bindings, now = Date.now()) {
-  try {
-    const snapshot = await env.DB.prepare(
-      `SELECT
+const LifecycleSnapshot = Schema.Struct({
+  deletionCount: Schema.Number,
+  oldestDeletionAt: Schema.Union([Schema.Number, Schema.Null]),
+  expiredReservationCount: Schema.Number,
+  recoveryAccountCount: Schema.Number,
+});
+
+export const recordLifecycleMetrics = Effect.fn(
+  "LifecycleMetrics.recordLifecycleMetrics",
+)(function* (now = Date.now()) {
+  const d1 = yield* D1;
+  const events = yield* AnalyticsEngine;
+
+  yield* Effect.gen(function* () {
+    const snapshot = yield* d1.first(
+      d1.bind(
+        d1.prepare(
+          `SELECT
         (SELECT COUNT(*) FROM deletion_jobs) AS deletionCount,
         (SELECT MIN(created_at) FROM deletion_jobs) AS oldestDeletionAt,
         (SELECT COUNT(*) FROM upload_reservations WHERE expires_at <= ?) AS expiredReservationCount,
         (SELECT COUNT(*) FROM users
           WHERE deletion_requested_at IS NOT NULL AND deletion_next_recovery_at <= ?) AS recoveryAccountCount`,
-    ).bind(now, now).first<LifecycleSnapshot>();
-    if (!snapshot) return;
+        ),
+        now,
+        now,
+      ),
+      LifecycleSnapshot,
+    );
+    if (snapshot === null) return;
 
     const oldestAgeHours = snapshot.oldestDeletionAt === null
       ? 0
       : Math.max(0, (now - snapshot.oldestDeletionAt) / (60 * 60 * 1_000));
-    env.EVENTS.writeDataPoint({
+    yield* events.write({
       blobs: [
         "lifecycle_snapshot",
         countBucket(snapshot.deletionCount),
@@ -36,10 +51,15 @@ export async function recordLifecycleMetrics(env: Bindings, now = Date.now()) {
       ],
       indexes: ["lifecycle_snapshot"],
     });
-  } catch (error) {
-    console.error("Lifecycle metrics unavailable", error);
-  }
-}
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        // Lifecycle telemetry is best-effort and must not affect scheduled cleanup.
+        console.error("Lifecycle metrics unavailable", error);
+      })
+    ),
+  );
+});
 
 function countBucket(count: number) {
   if (count === 0) return "empty";
