@@ -105,34 +105,6 @@ a { color: inherit; }
 }
 
 .hero-actions { display: flex; gap: 12px; margin: 18px 0 22px; flex-wrap: wrap; }
-.landing-button {
-  min-height: 48px;
-  padding: 0 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  cursor: pointer;
-  font-weight: 750;
-  transition: background .15s ease, border-color .15s ease, transform .15s ease;
-}
-.landing-button:hover:not(:disabled) { transform: translateY(-1px); }
-.landing-button:focus-visible { outline: 2px solid var(--deep); outline-offset: 3px; }
-.landing-button:disabled { cursor: not-allowed; }
-.landing-button[aria-busy="true"] { cursor: progress; }
-.landing-button svg, .landing-button-spinner { width: 18px; height: 18px; }
-.landing-button-primary { color: var(--deep); background: var(--acid); border-color: var(--acid-dark); }
-.landing-button-primary:hover:not(:disabled) { background: #e7ff75; }
-.landing-button-secondary { color: var(--deep); background: var(--paper); border-color: #c8c5ba; }
-.landing-button-secondary:hover:not(:disabled) { background: #efede5; border-color: #9da89e; }
-.landing-button-spinner {
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: spin .8s linear infinite;
-}
 .landing-error {
   max-width: 610px;
   padding: 13px 15px;
@@ -516,7 +488,6 @@ a { color: inherit; }
   .hero { min-height: auto; padding: 54px 0 70px; gap: 60px; }
   .hero h1 { font-size: clamp(42px, 13vw, 53px); }
   .hero-actions { align-items: stretch; flex-direction: column; }
-  .landing-button { width: 100%; }
   .security-visual { min-height: 280px; }
   .header-actions .encrypted-state, .desktop-add-passkey { display: none; }
   .dashboard-head { padding-top: 45px; align-items: stretch; }

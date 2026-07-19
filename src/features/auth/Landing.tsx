@@ -1,3 +1,5 @@
+import "@cloudflare/kumo/styles/standalone";
+import { Button } from "@cloudflare/kumo/components/button";
 import { FingerprintIcon, KeyIcon, LockKeyIcon, PlusIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
@@ -47,26 +49,25 @@ export function Landing({
             <Turnstile key={challengeVersion} siteKey={config.turnstileSiteKey} onToken={setTurnstileToken} />
           )}
           <div className="hero-actions">
-            <button
-              aria-busy={busy === "register"}
-              className="landing-button landing-button-primary"
-              type="button"
+            <Button
+              variant="primary"
+              size="lg"
+              icon={PlusIcon}
+              loading={busy === "register"}
               disabled={busy !== null || Boolean(config.turnstileSiteKey && !turnstileToken)}
               onClick={register}
             >
-              {busy === "register" ? <span className="landing-button-spinner" /> : <PlusIcon aria-hidden />}
-              {busy === "register" ? "Creating…" : "Create a vault"}
-            </button>
-            <button
-              aria-busy={busy === "unlock"}
-              className="landing-button landing-button-secondary"
-              type="button"
+              Create a vault
+            </Button>
+            <Button
+              size="lg"
+              icon={FingerprintIcon}
+              loading={busy === "unlock"}
               disabled={busy !== null}
               onClick={onUnlock}
             >
-              {busy === "unlock" ? <span className="landing-button-spinner" /> : <FingerprintIcon aria-hidden />}
-              {busy === "unlock" ? "Unlocking…" : "Unlock your vault"}
-            </button>
+              Unlock your vault
+            </Button>
           </div>
           {error && (
             <div className="landing-error" role="alert">
