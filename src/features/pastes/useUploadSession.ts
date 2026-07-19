@@ -1,7 +1,11 @@
+import { Effect, Result, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 
 import type { StoredAttachment } from "../../../shared/protocol/attachments";
-import { api, ApiError } from "../../lib/api";
+import { AttachmentListResponse, NoContentResponse } from "../../../shared/schema/api";
+import { ApiStatusError } from "../../effect/api";
+import { requestApi } from "../../effect/runtime";
+import { ApiError } from "../../lib/api";
 import { encryptAttachment } from "../../lib/crypto";
 import { messageOf } from "../../lib/format";
 import { uploadWithRetry } from "../../lib/uploads";
@@ -32,16 +36,53 @@ type UploadDependencies = {
   list: (pasteId: string) => Promise<StoredAttachment[]>;
 };
 
+export class UploadOperationError extends Schema.TaggedErrorClass<UploadOperationError>()(
+  "UploadOperationError",
+  {
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
+const causeMessage = (cause: unknown, fallback: string) =>
+  cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
+
+const fromUploadPromise = <A>(operation: () => PromiseLike<A>) => Effect.tryPromise({
+  try: operation,
+  catch: (cause) => UploadOperationError.make({
+    message: causeMessage(cause, "Upload operation failed."),
+    cause,
+  }),
+});
+
+const compatibleApiError = (cause: unknown) => {
+  if (cause instanceof ApiError || cause instanceof ApiStatusError) return cause;
+  return UploadOperationError.make({
+    message: causeMessage(cause, "Failed to discard the upload session."),
+    cause,
+  });
+};
+
+const isMissingApiError = (cause: unknown) =>
+  (cause instanceof ApiError || cause instanceof ApiStatusError) && cause.status === 404;
+
 const defaultDependencies: UploadDependencies = {
   encrypt: encryptAttachment,
   upload: uploadWithRetry,
   list: async (pasteId) => {
-    const response = await api<{ attachments: StoredAttachment[] }>(`/api/pastes/${pasteId}/files`);
+    const response = await requestApi(`/api/pastes/${pasteId}/files`, AttachmentListResponse);
     return response.attachments;
   },
 };
 
 let nextSelectionId = 0;
+
+const makeSelectedFile = (file: File): SelectedFile => ({
+  id: `selected-${Date.now()}-${nextSelectionId++}`,
+  file,
+  phase: "pending",
+  progress: 0,
+});
 
 export function useUploadSession() {
   const [files, setFiles] = useState<SelectedFile[]>([]);
@@ -53,12 +94,7 @@ export function useUploadSession() {
   function appendFiles(selected: File[]) {
     setFiles((current) => [
       ...current,
-      ...selected.map((file) => ({
-        id: `selected-${Date.now()}-${nextSelectionId++}`,
-        file,
-        phase: "pending" as const,
-        progress: 0,
-      })),
+      ...selected.map(makeSelectedFile),
     ]);
   }
 
@@ -100,35 +136,49 @@ export function useUploadSession() {
   };
 }
 
-export async function uploadSelectedFile({
-  selected,
-  session,
-  payloads,
-  update,
-  dependencies = defaultDependencies,
-}: {
+type UploadSelectedFileInput = {
   selected: SelectedFile;
   session: UploadSession;
   payloads: UploadPayloadCache;
   update: (patch: Partial<SelectedFile>) => void;
   dependencies?: UploadDependencies;
-}) {
-  update({ progress: 0, error: undefined, attempt: undefined, maxAttempts: undefined });
-  try {
+};
+
+export const uploadSelectedFileEffect = Effect.fn("uploadSelectedFile")(function*({
+  selected,
+  session,
+  payloads,
+  update,
+  dependencies = defaultDependencies,
+}: UploadSelectedFileInput) {
+  yield* Effect.sync(() => update({
+    progress: 0,
+    error: undefined,
+    attempt: undefined,
+    maxAttempts: undefined,
+  }));
+
+  const operation = Effect.gen(function*() {
     let attachment = payloads.get(selected.id);
-    if (!attachment) {
-      update({ phase: "encrypting" });
-      attachment = await dependencies.encrypt(session.pasteKey, session.pasteId, selected.file);
+    if (attachment === undefined) {
+      yield* Effect.sync(() => update({ phase: "encrypting" }));
+      attachment = yield* fromUploadPromise(() => dependencies.encrypt(
+        session.pasteKey,
+        session.pasteId,
+        selected.file,
+      ));
       payloads.retain(selected.id, attachment);
     }
-    update({ phase: "uploading" });
-    await dependencies.upload(
-      `/api/pastes/${session.pasteId}/files/${attachment.id}`,
-      attachment.body,
-      attachment.headers,
+
+    const retainedAttachment = attachment;
+    yield* Effect.sync(() => update({ phase: "uploading" }));
+    yield* fromUploadPromise(() => dependencies.upload(
+      `/api/pastes/${session.pasteId}/files/${retainedAttachment.id}`,
+      retainedAttachment.body,
+      retainedAttachment.headers,
       {
         onProgress: (loaded, reportedTotal) => {
-          const total = reportedTotal || attachment.body.byteLength;
+          const total = reportedTotal || retainedAttachment.body.byteLength;
           update({
             phase: "uploading",
             progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
@@ -142,46 +192,96 @@ export async function uploadSelectedFile({
         }),
         confirmConflict: async () => {
           const attachments = await dependencies.list(session.pasteId);
-          return attachments.some(({ id }) => id === attachment.id);
+          return attachments.some(({ id }) => id === retainedAttachment.id);
         },
       },
-    );
-    payloads.release(selected.id);
-    update({ phase: "complete", progress: 100, attempt: undefined, maxAttempts: undefined });
-    return true;
-  } catch (cause) {
-    update({ phase: "error", progress: 0, error: messageOf(cause) });
+    ));
+  });
+
+  const result = yield* Effect.result(operation);
+  if (Result.isFailure(result)) {
+    yield* Effect.sync(() => update({
+      phase: "error",
+      progress: 0,
+      error: messageOf(result.failure),
+    }));
     return false;
   }
+
+  payloads.release(selected.id);
+  yield* Effect.sync(() => update({
+    phase: "complete",
+    progress: 100,
+    attempt: undefined,
+    maxAttempts: undefined,
+  }));
+  return true;
+});
+
+/** Promise adapter retained for React event handlers. */
+export function uploadSelectedFile(input: UploadSelectedFileInput): Promise<boolean> {
+  return Effect.runPromise(uploadSelectedFileEffect(input));
 }
 
-export async function uploadUntilFailure(
-  files: SelectedFile[],
-  upload: (file: SelectedFile) => Promise<boolean>,
+export const uploadUntilFailureEffect: <E, R>(
+  files: readonly SelectedFile[],
+  upload: (file: SelectedFile) => Effect.Effect<boolean, E, R>,
+) => Effect.Effect<{
+  attemptedIds: Set<string>;
+  failedIds: Set<string>;
+}, E, R> = Effect.fn("uploadUntilFailure")(function*<E, R>(
+  files: readonly SelectedFile[],
+  upload: (file: SelectedFile) => Effect.Effect<boolean, E, R>,
 ) {
   const attemptedIds = new Set<string>();
   const failedIds = new Set<string>();
-  for (const file of files) {
-    attemptedIds.add(file.id);
-    if (!(await upload(file))) {
-      failedIds.add(file.id);
-      break;
-    }
-  }
+  yield* Effect.forEach(files, (file) => {
+    if (failedIds.size > 0) return Effect.void;
+    return Effect.sync(() => attemptedIds.add(file.id)).pipe(
+      Effect.andThen(upload(file)),
+      Effect.tap((succeeded) => Effect.sync(() => {
+        if (!succeeded) failedIds.add(file.id);
+      })),
+      Effect.asVoid,
+    );
+  }, { concurrency: 1, discard: true });
   return { attemptedIds, failedIds };
+});
+
+/** Promise adapter retained for React event handlers. */
+export function uploadUntilFailure(
+  files: readonly SelectedFile[],
+  upload: (file: SelectedFile) => Promise<boolean>,
+): Promise<{ attemptedIds: Set<string>; failedIds: Set<string> }> {
+  return Effect.runPromise(uploadUntilFailureEffect(
+    files,
+    (file) => fromUploadPromise(() => upload(file)),
+  ));
 }
 
-export async function discardUploadSession(
+export const discardUploadSessionEffect = Effect.fn("discardUploadSession")(function*<E, R>(
+  pasteId: string,
+  remove: (pasteId: string) => Effect.Effect<void, E, R>,
+) {
+  yield* remove(pasteId).pipe(
+    Effect.catchIf(isMissingApiError, () => Effect.void),
+  );
+});
+
+/** Promise adapter retained for React event handlers. */
+export function discardUploadSession(
   pasteId: string,
   remove: (pasteId: string) => Promise<void> = async (id) => {
-    await api<void>(`/api/pastes/${id}`, { method: "DELETE" });
+    await requestApi(`/api/pastes/${id}`, NoContentResponse, { method: "DELETE" });
   },
-) {
-  try {
-    await remove(pasteId);
-  } catch (cause) {
-    if (!(cause instanceof ApiError && cause.status === 404)) throw cause;
-  }
+): Promise<void> {
+  return Effect.runPromise(discardUploadSessionEffect(
+    pasteId,
+    (id) => Effect.tryPromise({
+      try: () => remove(id),
+      catch: compatibleApiError,
+    }),
+  ));
 }
 
 export function createUploadPayloadCache() {

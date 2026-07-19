@@ -1,3 +1,6 @@
+import { Effect, Schedule, Schema } from "effect";
+
+import { ApiStatusError } from "../effect/api";
 import { ApiError } from "./api";
 
 const MAX_UPLOAD_ATTEMPTS = 3;
@@ -8,81 +11,176 @@ type UploadCallbacks = {
   confirmConflict?: () => Promise<boolean>;
 };
 
-export async function uploadWithRetry(
-  path: string,
-  body: XMLHttpRequestBodyInit,
-  headers: HeadersInit,
-  callbacks: UploadCallbacks,
-) {
-  for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt += 1) {
-    try {
-      await upload(path, body, headers, callbacks.onProgress);
-      return;
-    } catch (cause) {
-      // The server may have persisted the exact attachment even when its response was lost.
-      if (cause instanceof ApiError && cause.status === 409 && callbacks.confirmConflict) {
-        if (await callbacks.confirmConflict()) return;
-      }
-      if (!isRetryable(cause) || attempt === MAX_UPLOAD_ATTEMPTS) throw cause;
+export class UploadReconciliationError extends Schema.TaggedErrorClass<UploadReconciliationError>()(
+  "UploadReconciliationError",
+  {
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
 
-      callbacks.onRetry(attempt + 1, MAX_UPLOAD_ATTEMPTS);
-      await waitBeforeRetry(attempt);
-    }
+const causeMessage = (cause: unknown, fallback: string) =>
+  cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
+
+const statusOf = (cause: unknown) => {
+  if (cause instanceof ApiStatusError || cause instanceof ApiError) return cause.status;
+  return undefined;
+};
+
+const isRetryable = (cause: unknown) => {
+  const status = statusOf(cause);
+  return status === 0 || status === 408 || status === 425 || status === 429 || status !== undefined && status >= 500;
+};
+
+const waitUntilOnline = Effect.fn("waitUntilOnline")(function*() {
+  if (
+    typeof window === "undefined"
+    || typeof navigator === "undefined"
+    || navigator.onLine !== false
+  ) return;
+
+  const online = Effect.callback<void>((resume) => {
+    const onOnline = () => resume(Effect.void);
+    window.addEventListener("online", onOnline, { once: true });
+    return Effect.sync(() => window.removeEventListener("online", onOnline));
+  });
+
+  yield* Effect.raceFirst(online, Effect.sleep("5 seconds"));
+});
+
+const responseMessage = (request: XMLHttpRequest) => {
+  try {
+    const body: unknown = JSON.parse(request.responseText);
+    if (
+      typeof body === "object"
+      && body !== null
+      && "error" in body
+      && typeof body.error === "string"
+      && body.error.length > 0
+    ) return body.error;
+  } catch {
+    // Keep the status-based message when the response has no JSON body.
   }
-}
+  return `Upload failed (${request.status})`;
+};
 
-function upload(
+export const uploadEffect = Effect.fn("upload")(function*(
   path: string,
   body: XMLHttpRequestBodyInit,
   headers: HeadersInit,
   onProgress: (loaded: number, total: number) => void,
 ) {
-  return new Promise<void>((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open("PUT", path);
-    new Headers(headers).forEach((value, name) => request.setRequestHeader(name, value));
+  yield* Effect.callback<void, ApiStatusError>((resume) => {
+    let request: XMLHttpRequest;
+    try {
+      request = new XMLHttpRequest();
+      request.open("PUT", path);
+      new Headers(headers).forEach((value, name) => request.setRequestHeader(name, value));
+    } catch (cause) {
+      resume(Effect.fail(ApiStatusError.make({
+        message: causeMessage(cause, "Upload could not be started."),
+        status: 0,
+      })));
+      return;
+    }
 
-    request.upload.addEventListener("progress", (event) => {
+    const finish = (effect: Effect.Effect<void, ApiStatusError>) => {
+      cleanup();
+      resume(effect);
+    };
+    const onUploadProgress = (event: ProgressEvent) => {
       onProgress(event.loaded, event.lengthComputable ? event.total : 0);
-    });
-    request.addEventListener("load", () => {
+    };
+    const onLoad = () => {
       if (request.status >= 200 && request.status < 300) {
-        resolve();
+        finish(Effect.void);
         return;
       }
-      reject(new ApiError(responseMessage(request), request.status));
+      finish(Effect.fail(ApiStatusError.make({
+        message: responseMessage(request),
+        status: request.status,
+      })));
+    };
+    const onError = () => finish(Effect.fail(ApiStatusError.make({
+      message: "Upload interrupted. Check your connection and retry.",
+      status: 0,
+    })));
+    const onAbort = () => finish(Effect.fail(ApiStatusError.make({
+      message: "Upload canceled.",
+      status: 0,
+    })));
+    const cleanup = () => {
+      request.upload.removeEventListener("progress", onUploadProgress);
+      request.removeEventListener("load", onLoad);
+      request.removeEventListener("error", onError);
+      request.removeEventListener("abort", onAbort);
+    };
+
+    request.upload.addEventListener("progress", onUploadProgress);
+    request.addEventListener("load", onLoad);
+    request.addEventListener("error", onError);
+    request.addEventListener("abort", onAbort);
+
+    try {
+      request.send(body);
+    } catch (cause) {
+      finish(Effect.fail(ApiStatusError.make({
+        message: causeMessage(cause, "Upload could not be sent."),
+        status: 0,
+      })));
+    }
+
+    return Effect.sync(() => {
+      cleanup();
+      request.abort();
     });
-    request.addEventListener("error", () => reject(new ApiError("Upload interrupted. Check your connection and retry.", 0)));
-    request.addEventListener("abort", () => reject(new ApiError("Upload canceled.", 0)));
-    request.send(body);
   });
-}
+});
 
-function responseMessage(request: XMLHttpRequest) {
-  try {
-    const body = JSON.parse(request.responseText) as { error?: string };
-    if (body.error) return body.error;
-  } catch {
-    // Keep the status-based message when the response has no JSON body.
-  }
-  return `Upload failed (${request.status})`;
-}
+const reconcileConflict = Effect.fn("reconcileUploadConflict")(function*(
+  error: ApiStatusError,
+  confirmConflict: (() => Promise<boolean>) | undefined,
+) {
+  if (error.status !== 409 || confirmConflict === undefined) return yield* error;
 
-function isRetryable(cause: unknown) {
-  if (!(cause instanceof ApiError)) return false;
-  return cause.status === 0 || cause.status === 408 || cause.status === 425 || cause.status === 429 || cause.status >= 500;
-}
+  const confirmed = yield* Effect.tryPromise({
+    try: () => confirmConflict(),
+    catch: (cause) => UploadReconciliationError.make({
+      message: causeMessage(cause, "Failed to confirm the uploaded attachment."),
+      cause,
+    }),
+  });
+  if (!confirmed) return yield* error;
+});
 
-async function waitBeforeRetry(attempt: number) {
-  if (typeof window !== "undefined" && typeof navigator !== "undefined" && navigator.onLine === false) {
-    await Promise.race([
-      new Promise<void>((resolve) => window.addEventListener("online", () => resolve(), { once: true })),
-      delay(5_000),
-    ]);
-  }
-  await delay(500 * (2 ** (attempt - 1)));
-}
+export const uploadWithRetryEffect = Effect.fn("uploadWithRetry")(function*(
+  path: string,
+  body: XMLHttpRequestBodyInit,
+  headers: HeadersInit,
+  callbacks: UploadCallbacks,
+) {
+  const retrySchedule = Schedule.exponential("500 millis").pipe(
+    Schedule.upTo({ times: MAX_UPLOAD_ATTEMPTS - 1 }),
+    Schedule.tap(({ attempt }) => waitUntilOnline().pipe(
+      Effect.tap(() => Effect.sync(() => callbacks.onRetry(attempt + 1, MAX_UPLOAD_ATTEMPTS))),
+    )),
+  );
 
-function delay(milliseconds: number) {
-  return new Promise<void>((resolve) => globalThis.setTimeout(resolve, milliseconds));
+  yield* uploadEffect(path, body, headers, callbacks.onProgress).pipe(
+    Effect.catch((error) => reconcileConflict(error, callbacks.confirmConflict)),
+    Effect.retry({
+      schedule: retrySchedule,
+      while: isRetryable,
+    }),
+  );
+});
+
+/** Promise adapter retained while browser callers migrate to Effect. */
+export function uploadWithRetry(
+  path: string,
+  body: XMLHttpRequestBodyInit,
+  headers: HeadersInit,
+  callbacks: UploadCallbacks,
+): Promise<void> {
+  return Effect.runPromise(uploadWithRetryEffect(path, body, headers, callbacks));
 }

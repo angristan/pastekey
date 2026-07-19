@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ApiStatusError } from "../../effect/api";
 import { ApiError } from "../../lib/api";
 import {
   createUploadPayloadCache,
@@ -40,15 +41,20 @@ describe("upload payload ownership", () => {
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce(undefined);
     const update = vi.fn();
-    const selected = {
+    const selected: SelectedFile = {
       id: "selection",
       file: new File(["content"], "file.txt"),
-      phase: "pending" as const,
+      phase: "pending",
       progress: 0,
     };
+    const pasteKey = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt"],
+    );
     const input = {
       selected,
-      session: { pasteId: "paste-000000000000001", pasteKey: {} as CryptoKey },
+      session: { pasteId: "paste-000000000000001", pasteKey },
       payloads: cache,
       update,
       dependencies: { encrypt, upload, list: async () => [] },
@@ -63,10 +69,10 @@ describe("upload payload ownership", () => {
   });
 
   it("stops before encrypting more files after the first failure", async () => {
-    const files = ["first", "failed", "not-started"].map((id) => ({
+    const files: SelectedFile[] = ["first", "failed", "not-started"].map((id) => ({
       id,
       file: new File([id], `${id}.txt`),
-      phase: "pending" as const,
+      phase: "pending",
       progress: 0,
     }));
     const upload = vi.fn(async (file: SelectedFile) => file.id !== "failed");
@@ -81,6 +87,9 @@ describe("upload payload ownership", () => {
   it("treats an already removed unfinished item as discarded", async () => {
     await expect(discardUploadSession("paste", async () => {
       throw new ApiError("Not found", 404);
+    })).resolves.toBeUndefined();
+    await expect(discardUploadSession("paste", async () => {
+      throw ApiStatusError.make({ message: "Not found", status: 404 });
     })).resolves.toBeUndefined();
     await expect(discardUploadSession("paste", async () => {
       throw new ApiError("Unavailable", 503);

@@ -1,30 +1,48 @@
-export async function settledMap<T, U>(
+import { Effect, Result, Schema } from "effect";
+
+export class InvalidConcurrencyError extends Schema.TaggedErrorClass<InvalidConcurrencyError>()(
+  "InvalidConcurrencyError",
+  {
+    message: Schema.String,
+    concurrency: Schema.Number,
+  },
+) {}
+
+export const settledMapEffect = Effect.fn("settledMap")(function*<T, U, E, R>(
+  values: readonly T[],
+  concurrency: number,
+  map: (value: T, index: number) => Effect.Effect<U, E, R>,
+) {
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    return yield* InvalidConcurrencyError.make({
+      message: "Concurrency must be a positive integer",
+      concurrency,
+    });
+  }
+
+  const results = yield* Effect.forEach(
+    values,
+    (value, index) => Effect.result(map(value, index)),
+    { concurrency },
+  );
+  const settledValues: U[] = [];
+  let failureCount = 0;
+  for (const result of results) {
+    if (Result.isSuccess(result)) settledValues.push(result.success);
+    else failureCount += 1;
+  }
+  return { values: settledValues, failureCount };
+});
+
+/** Promise adapter retained while browser callers migrate to Effect. */
+export function settledMap<T, U>(
   values: readonly T[],
   concurrency: number,
   map: (value: T, index: number) => Promise<U>,
-) {
-  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
-    throw new Error("Concurrency must be a positive integer");
-  }
-  const results: U[] = [];
-  const completed: Array<{ index: number; value: U }> = [];
-  let nextIndex = 0;
-  let failureCount = 0;
-
-  async function worker() {
-    while (true) {
-      const index = nextIndex++;
-      if (index >= values.length) return;
-      try {
-        completed.push({ index, value: await map(values[index]!, index) });
-      } catch {
-        failureCount += 1;
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
-  completed.sort((left, right) => left.index - right.index);
-  for (const { value } of completed) results.push(value);
-  return { values: results, failureCount };
+): Promise<{ values: U[]; failureCount: number }> {
+  return Effect.runPromise(settledMapEffect(
+    values,
+    concurrency,
+    (value, index) => Effect.tryPromise(() => map(value, index)),
+  ));
 }
