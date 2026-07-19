@@ -277,6 +277,11 @@ const parseJson = (plaintext: Uint8Array<ArrayBuffer>) => Effect.try({
   }),
 });
 
+const preserveDecodedProperties = <A extends object>(decoded: A, input: unknown): A =>
+  typeof input === "object" && input !== null && !Array.isArray(input)
+    ? Object.assign({}, input, decoded)
+    : decoded;
+
 export const encryptBytesEffect = Effect.fn("encryptBytes")(function*(
   key: CryptoKey,
   plaintext: Uint8Array<ArrayBuffer>,
@@ -419,6 +424,7 @@ const decryptPayloadEffect = Effect.fn("decryptPayload")(function*(
   const plaintext = yield* decryptBytesEffect(key, decodedCiphertext, encodedIv, `pastekey/paste/${id}/v1`);
   const value = yield* parseJson(plaintext);
   return yield* Schema.decodeUnknownEffect(PastePayloadSchema)(value).pipe(
+    Effect.map((decoded) => preserveDecodedProperties(decoded, value)),
     Effect.mapError((cause) => CryptoValidationError.make({
       message: "Invalid encrypted paste payload",
       cause,
@@ -581,6 +587,7 @@ export const decryptAttachmentMetadataEffect = Effect.fn("decryptAttachmentMetad
   );
   const value = yield* parseJson(plaintext);
   const metadata: AttachmentMetadata = yield* Schema.decodeUnknownEffect(AttachmentMetadataSchema)(value).pipe(
+    Effect.map((decoded) => preserveDecodedProperties(decoded, value)),
     Effect.mapError((cause) => CryptoValidationError.make({
       message: "Invalid encrypted attachment metadata",
       cause,

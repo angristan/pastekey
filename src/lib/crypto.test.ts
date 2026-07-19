@@ -46,6 +46,8 @@ describe("Pastekey envelope encryption", () => {
 
     const wrapped = await wrapAccountKey(accountKey, passkeyKey, credentialId);
     const recovered = await unwrapAccountKey(wrapped, passkeyKey, credentialId);
+    expect(recovered.extractable).toBe(true);
+    expect([...recovered.usages]).toEqual(["encrypt", "decrypt", "wrapKey", "unwrapKey"]);
 
     const encrypted = await encryptNewPaste(recovered, payload, null);
     const stored = asStoredPaste(encrypted.write);
@@ -96,6 +98,19 @@ describe("Pastekey envelope encryption", () => {
     await expect(decryptOwnedPaste(accountKey, asStoredPaste(invalid.write))).rejects.toThrow("Invalid encrypted paste payload");
   });
 
+  it("preserves extension fields in encrypted legacy payloads", async () => {
+    const accountKey = await generateAccountKey();
+    const extendedPayload: PastePayload & { futureField: string } = {
+      ...payload,
+      futureField: "preserve-me",
+    };
+    const encrypted = await encryptNewPaste(accountKey, extendedPayload, null);
+
+    await expect(decryptOwnedPaste(accountKey, asStoredPaste(encrypted.write))).resolves.toMatchObject({
+      payload: extendedPayload,
+    });
+  });
+
   it("encrypts file bytes and metadata under a paste key", async () => {
     const accountKey = await generateAccountKey();
     const encrypted = await encryptNewPaste(accountKey, payload, null);
@@ -114,6 +129,8 @@ describe("Pastekey envelope encryption", () => {
     };
 
     const unlocked = await decryptAttachmentMetadata(encrypted.pasteKey, stored);
+    expect(unlocked.fileKey.extractable).toBe(true);
+    expect([...unlocked.fileKey.usages]).toEqual(["encrypt", "decrypt"]);
     expect(unlocked.metadata).toEqual({ name: "secret.txt", type: "text/plain", size: 18 });
     const plaintext = await decryptAttachmentContent(unlocked.fileKey, stored, prepared.body.buffer);
     expect(new TextDecoder().decode(plaintext)).toBe("private attachment");
