@@ -5,7 +5,10 @@ import { defineConfig } from "vite";
 export default defineConfig({
   environments: {
     pastekey: {
-      build: { sourcemap: true },
+      build: {
+        minify: true,
+        sourcemap: true,
+      },
     },
   },
   plugins: [react(), cloudflare()],
