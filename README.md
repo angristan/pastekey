@@ -58,13 +58,13 @@ Shared URLs use generic Open Graph metadata and are served with `noindex`; encry
 ## Architecture
 
 ```text
-Browser
+Browser (React host + Effect services)
   ├── WebAuthn PRF + WebCrypto
   ├── plaintext and keys remain local
   └── URL-fragment share secret
           │ ciphertext only
           ▼
-Cloudflare Worker (Hono)
+Cloudflare Worker (Hono host + Effect services)
   ├── D1: users, credentials, sessions, ciphertext metadata, deletion outbox
   ├── R2: encrypted attachment bodies
   ├── Queues + DLQ: retryable routine deletion
@@ -75,20 +75,28 @@ Cloudflare Worker (Hono)
 The codebase is feature-oriented:
 
 ```text
+shared/
+├── protocol/            # Stable wire-format types
+└── schema/              # Effect schemas for untrusted boundaries
+
 src/
-├── components/          # Shared UI
-├── crypto/              # Account, item/share, attachment protocols and primitives
+├── components/          # Shared UI and React host adapters
+├── crypto/              # Promise compatibility adapters
+├── effect/              # Typed API, crypto, and WebAuthn services
 ├── features/            # Auth, vault, composer, and public sharing
-└── lib/                 # API, passkeys, downloads, formatting, and protocol types
+└── lib/                 # Downloads, uploads, formatting, and protocol helpers
 
 worker/
-├── routes/              # HTTP and authorization boundaries
+├── routes/              # Thin Hono HTTP and authorization adapters
 ├── middleware/          # Security, rate limiting, and analytics
-├── repositories/        # D1/R2 persistence
-├── services/            # Sessions, Turnstile, cleanup, and deletion recovery
-├── workflows/           # Durable account deletion
+├── platform/            # Typed D1 and Cloudflare Effect services
+├── repositories/        # Schema-decoded persistence operations
+├── services/            # Sessions, auth, cleanup, and deletion recovery
+├── workflows/           # Durable account deletion host adapter
 └── lib/                 # Validation, encoding, and configuration
 ```
+
+Fallible asynchronous application logic uses Effect with typed failures and cancellation. React, Hono, Queues, and Workflows remain host adapters. Native `D1Database.batch()` stays behind the typed D1 platform service so atomic writes and `meta.changes` semantics remain intact.
 
 D1 conditional writes and upload reservations enforce item, file-count, and storage quotas under concurrency. Routine R2 deletion uses a transactional D1 outbox, Queue retries, and an actively consumed dead-letter queue. Interrupted account-deletion Workflows are reconciled by scheduled cleanup.
 
