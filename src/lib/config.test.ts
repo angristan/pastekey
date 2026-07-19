@@ -25,7 +25,7 @@ describe("runtime configuration", () => {
     await expect(appConfig()).rejects.toThrow("temporary failure");
     const first = appConfig();
     const second = appConfig();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
     resolveResponse(Response.json(config));
     await expect(Promise.all([first, second])).resolves.toEqual([config, config]);

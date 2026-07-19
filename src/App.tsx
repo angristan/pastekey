@@ -1,12 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { CenteredStatus } from "./components/CenteredStatus";
-import { requestApi } from "./effect/runtime";
 import { appConfig } from "./lib/config";
 import { messageOf } from "./lib/format";
 import { shareIdFromPath } from "./lib/routes";
-import { NoContentResponse } from "../shared/schema/api";
-import { MeResponse } from "../shared/schema/auth";
+import type { MeResponse } from "../shared/protocol/auth";
 import type { AppConfig } from "../shared/protocol/config";
 
 const Landing = lazy(() => import("./features/auth/Landing").then((module) => ({ default: module.Landing })));
@@ -34,7 +32,11 @@ function VaultApp() {
   const authController = useRef<AbortController | null>(null);
 
   const refreshMe = useCallback(async (signal?: AbortSignal) => {
-    const response = await requestApi("/api/auth/me", MeResponse, { signal });
+    const [{ requestApi }, { MeResponse: MeResponseSchema }] = await Promise.all([
+      import("./effect/runtime"),
+      import("../shared/schema/auth"),
+    ]);
+    const response = await requestApi("/api/auth/me", MeResponseSchema, { signal });
     if (!signal?.aborted && mounted.current) setMe(response);
   }, []);
 
@@ -90,6 +92,10 @@ function VaultApp() {
   }
 
   async function logout() {
+    const [{ requestApi }, { NoContentResponse }] = await Promise.all([
+      import("./effect/runtime"),
+      import("../shared/schema/api"),
+    ]);
     await requestApi("/api/auth/logout", NoContentResponse, { method: "POST" });
     setAccountKey(null);
     setMe({ authenticated: false });
