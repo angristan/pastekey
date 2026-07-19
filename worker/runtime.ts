@@ -5,10 +5,12 @@ import {
   AnalyticsEngine,
   DeletionQueue,
   R2FileStorage,
+  RateLimiter,
   accountWorkflowLayer,
   analyticsEngineLayer,
   deletionQueueLayer,
   r2FileStorageLayer,
+  rateLimiterLayer,
 } from "./platform/cloudflare";
 import { D1, layer as d1Layer } from "./platform/d1";
 import type { Bindings } from "./types";
@@ -18,7 +20,8 @@ export type WorkerServices =
   | R2FileStorage
   | DeletionQueue
   | AccountWorkflow
-  | AnalyticsEngine;
+  | AnalyticsEngine
+  | RateLimiter;
 
 export function workerLayer(env: Bindings): Layer.Layer<WorkerServices> {
   return Layer.mergeAll(
@@ -27,6 +30,10 @@ export function workerLayer(env: Bindings): Layer.Layer<WorkerServices> {
     deletionQueueLayer(env.DELETION_QUEUE),
     accountWorkflowLayer(env.ACCOUNT_DELETION),
     analyticsEngineLayer(env.EVENTS),
+    rateLimiterLayer({
+      AUTH_RATE_LIMITER: env.AUTH_RATE_LIMITER,
+      WRITE_RATE_LIMITER: env.WRITE_RATE_LIMITER,
+    }),
   );
 }
 

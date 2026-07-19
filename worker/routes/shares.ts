@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
 import { ShareWrite } from "../../shared/schema/pastes";
-import { streamR2Object } from "../lib/attachments-http";
+import { streamAttachmentObject } from "../lib/attachments-http";
 import { decodeJsonBody, normalizeExpiry, SMALL_JSON_BODY_BYTES } from "../lib/http";
 import { runWorkerEffect } from "../runtime";
 import {
@@ -73,5 +73,5 @@ shareRoutes.get("/api/shares/:shareId/files/:fileId/content", async (c) => {
   if (attachment === null) {
     return c.json({ error: "Attachment not found or share expired" }, 404);
   }
-  return streamR2Object(c.env.FILES, attachment.objectKey);
+  return runWorkerEffect(c.env, streamAttachmentObject(attachment.objectKey));
 });

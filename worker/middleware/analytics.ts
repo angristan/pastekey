@@ -1,6 +1,9 @@
+import { Cause, Effect } from "effect";
 import type { MiddlewareHandler } from "hono";
 
-import type { AppEnv, Bindings } from "../types";
+import { AnalyticsEngine } from "../platform/cloudflare";
+import { runWorkerEffect } from "../runtime";
+import type { AppEnv } from "../types";
 
 export type AnalyticsOperation =
   | "auth_register_options"
@@ -32,11 +35,28 @@ export function recordApiAnalytics(): MiddlewareHandler<AppEnv> {
     const startedAt = performance.now();
     try {
       await next();
-      record(c.env, operation, c.res.status, performance.now() - startedAt, metricBytes(operation, c.req.raw, c.res));
     } catch (error) {
-      record(c.env, operation, 500, performance.now() - startedAt, metricBytes(operation, c.req.raw));
+      await runWorkerEffect(
+        c.env,
+        recordAnalytics(
+          operation,
+          500,
+          performance.now() - startedAt,
+          metricBytes(operation, c.req.raw),
+        ),
+      );
       throw error;
     }
+
+    await runWorkerEffect(
+      c.env,
+      recordAnalytics(
+        operation,
+        c.res.status,
+        performance.now() - startedAt,
+        metricBytes(operation, c.req.raw, c.res),
+      ),
+    );
   };
 }
 
@@ -89,26 +109,28 @@ export function analyticsOperation(method: string, pathname: string): AnalyticsO
   return null;
 }
 
-function record(
-  env: Bindings,
+const recordAnalytics = Effect.fn("Analytics.recordApiOperation")(function* (
   operation: AnalyticsOperation,
   status: number,
   durationMs: number,
   bytes?: number,
 ) {
-  try {
+  const analytics = yield* AnalyticsEngine;
+  yield* analytics.write({
     // Schema: blob1=operation, blob2=outcome, blob3=size bucket; double1=duration ms, double2=status.
     // No identifiers, paths, IP addresses, filenames, or content are recorded.
-    env.EVENTS.writeDataPoint({
-      blobs: [operation, outcome(status), sizeBucket(bytes)],
-      doubles: [Math.round(durationMs * 100) / 100, status],
-      indexes: [operation],
-    });
-  } catch (error) {
-    // Product analytics must never affect request availability.
-    console.error("Analytics Engine unavailable", error);
-  }
-}
+    blobs: [operation, outcome(status), sizeBucket(bytes)],
+    doubles: [Math.round(durationMs * 100) / 100, status],
+    indexes: [operation],
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.sync(() => {
+        // Product analytics must never affect request availability.
+        console.error("Analytics Engine unavailable", Cause.squash(cause));
+      })
+    ),
+  );
+});
 
 function outcome(status: number) {
   if (status < 400) return "success";

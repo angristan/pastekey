@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 
-import { makeR2FileStorage, R2FileStorage } from "../platform/cloudflare";
+import { R2FileStorage } from "../platform/cloudflare";
 import { validOpaque } from "./http";
 
 export type AttachmentHeaders = {
@@ -57,12 +57,3 @@ export const streamAttachmentObject = Effect.fn("AttachmentsHttp.streamAttachmen
     return object === null ? attachmentDataNotFound() : attachmentDataResponse(object);
   },
 );
-
-// Named adapter for the share routes' remaining Promise boundary.
-export function streamR2Object(bucket: R2Bucket, objectKey: string) {
-  return Effect.runPromise(
-    streamAttachmentObject(objectKey).pipe(
-      Effect.provideService(R2FileStorage, makeR2FileStorage(bucket)),
-    ),
-  );
-}

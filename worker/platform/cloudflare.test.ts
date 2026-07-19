@@ -175,14 +175,18 @@ const r2 = new FakeR2Binding();
 const deletionQueue = new FakeDeletionQueueBinding();
 const accountWorkflow = new FakeAccountWorkflowBinding();
 const analyticsEngine = new FakeAnalyticsEngineBinding();
-const rateLimiter = new FakeRateLimiterBinding();
+const authRateLimiter = new FakeRateLimiterBinding();
+const writeRateLimiter = new FakeRateLimiterBinding();
 
 const PlatformTest = Layer.mergeAll(
   r2FileStorageLayer(r2),
   deletionQueueLayer(deletionQueue),
   accountWorkflowLayer(accountWorkflow),
   analyticsEngineLayer(analyticsEngine),
-  rateLimiterLayer(rateLimiter),
+  rateLimiterLayer({
+    AUTH_RATE_LIMITER: authRateLimiter,
+    WRITE_RATE_LIMITER: writeRateLimiter,
+  }),
 );
 
 layer(PlatformTest)("Cloudflare platform adapters", (it) => {
@@ -244,9 +248,10 @@ layer(PlatformTest)("Cloudflare platform adapters", (it) => {
       assert.strictEqual(analyticsEngine.events[0], dataPoint);
 
       const rateOptions: RateLimitOptions = { key: "auth:127.0.0.1" };
-      const outcome = yield* limiter.limit(rateOptions);
+      const outcome = yield* limiter.limit("AUTH_RATE_LIMITER", rateOptions);
       assert.strictEqual(outcome, rateLimitOutcome);
-      assert.strictEqual(rateLimiter.calls[0], rateOptions);
+      assert.strictEqual(authRateLimiter.calls[0], rateOptions);
+      assert.strictEqual(writeRateLimiter.calls.length, 0);
     }),
   );
 });
@@ -292,15 +297,21 @@ it.effect("maps promise and synchronous platform failures to typed errors", () =
         throw cause;
       },
     });
-    const limiter = makeRateLimiter({
+    const failingLimiter = {
       limit: () => Promise.reject(cause),
+    };
+    const limiter = makeRateLimiter({
+      AUTH_RATE_LIMITER: failingLimiter,
+      WRITE_RATE_LIMITER: failingLimiter,
     });
 
     const queueError = yield* Effect.flip(queue.sendBatch([]));
     const createError = yield* Effect.flip(workflow.create());
     const getError = yield* Effect.flip(workflow.get("workflow-1"));
     const analyticsError = yield* Effect.flip(analytics.write());
-    const rateLimitError = yield* Effect.flip(limiter.limit({ key: "key" }));
+    const rateLimitError = yield* Effect.flip(
+      limiter.limit("WRITE_RATE_LIMITER", { key: "key" }),
+    );
 
     assert.instanceOf(queueError, DeletionQueueError);
     assert.strictEqual(queueError.operation, "sendBatch");

@@ -201,6 +201,17 @@ export interface RateLimiterBinding {
   readonly limit: (options: RateLimitOptions) => Promise<RateLimitOutcome>;
 }
 
+export const RateLimiterBindingName = Schema.Literals([
+  "AUTH_RATE_LIMITER",
+  "WRITE_RATE_LIMITER",
+]);
+export type RateLimiterBindingName = typeof RateLimiterBindingName.Type;
+
+export interface RateLimiterBindings {
+  readonly AUTH_RATE_LIMITER: RateLimiterBinding;
+  readonly WRITE_RATE_LIMITER: RateLimiterBinding;
+}
+
 export const RateLimiterOperation = Schema.Literal("limit");
 export type RateLimiterOperation = typeof RateLimiterOperation.Type;
 
@@ -216,6 +227,7 @@ export class RateLimiter extends Context.Service<
   RateLimiter,
   {
     readonly limit: (
+      binding: RateLimiterBindingName,
       options: RateLimitOptions,
     ) => Effect.Effect<RateLimitOutcome, RateLimiterError>;
   }
@@ -224,15 +236,15 @@ export class RateLimiter extends Context.Service<
 const failRateLimiter = (cause: unknown) => RateLimiterError.make({ operation: "limit", cause });
 
 export const makeRateLimiter = (
-  limiter: RateLimiterBinding,
+  limiters: RateLimiterBindings,
 ): Context.Service.Shape<typeof RateLimiter> => ({
-  limit: (options) =>
+  limit: (binding, options) =>
     Effect.tryPromise({
-      try: () => limiter.limit(options),
+      try: () => limiters[binding].limit(options),
       catch: failRateLimiter,
     }),
 });
 
 export const rateLimiterLayer = (
-  limiter: RateLimiterBinding,
-): Layer.Layer<RateLimiter> => Layer.succeed(RateLimiter, makeRateLimiter(limiter));
+  limiters: RateLimiterBindings,
+): Layer.Layer<RateLimiter> => Layer.succeed(RateLimiter, makeRateLimiter(limiters));

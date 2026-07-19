@@ -1,6 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { env } from "cloudflare:workers";
+import { Hono } from "hono";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { analyticsOperation } from "./analytics";
+import type { AppEnv, Bindings } from "../types";
+import { analyticsOperation, recordApiAnalytics } from "./analytics";
+
+function isBindings(value: unknown): value is Bindings {
+  return typeof value === "object" && value !== null;
+}
+
+if (!isBindings(env)) throw new Error("Cloudflare test bindings are unavailable");
+const bindings = env;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("Analytics Engine operation classification", () => {
   it.each([
@@ -36,3 +50,62 @@ describe("Analytics Engine operation classification", () => {
     expect(analyticsOperation(method, pathname)).toBeNull();
   });
 });
+
+describe("Analytics Engine middleware", () => {
+  it("records only identifier-free bounded fields", async () => {
+    const writeDataPoint = vi.fn();
+    const app = analyticsApp();
+    const response = await app.fetch(
+      new Request(
+        "https://paste.test/api/shares/secret-share/files/secret-file/content",
+        { headers: { "CF-Connecting-IP": "203.0.113.7" } },
+      ),
+      { ...bindings, EVENTS: { writeDataPoint } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      blobs: ["shared_file_download", "success", "under_1_mib"],
+      doubles: [expect.any(Number), 200],
+      indexes: ["shared_file_download"],
+    });
+    const recorded = JSON.stringify(writeDataPoint.mock.calls);
+    expect(recorded).not.toContain("secret-share");
+    expect(recorded).not.toContain("secret-file");
+    expect(recorded).not.toContain("203.0.113.7");
+    expect(recorded).not.toContain("/api/");
+  });
+
+  it("does not affect the response when Analytics Engine fails", async () => {
+    const cause = new Error("dataset unavailable");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const app = analyticsApp();
+    const response = await app.fetch(
+      new Request("https://paste.test/api/shares/share/files/file/content"),
+      {
+        ...bindings,
+        EVENTS: {
+          writeDataPoint: () => {
+            throw cause;
+          },
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Analytics Engine unavailable",
+      expect.objectContaining({ _tag: "AnalyticsEngineError", cause }),
+    );
+  });
+});
+
+function analyticsApp() {
+  const app = new Hono<AppEnv>();
+  app.use("/api/*", recordApiAnalytics());
+  app.get("/api/shares/:shareId/files/:fileId/content", (c) => {
+    c.header("Content-Length", "2048");
+    return c.body("encrypted attachment");
+  });
+  return app;
+}
