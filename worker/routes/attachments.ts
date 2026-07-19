@@ -4,6 +4,7 @@ import { OPAQUE_ID, serviceLimits } from "../lib/config";
 import { readAttachmentHeaders, streamR2Object } from "../lib/attachments-http";
 import { listActiveOwnedAttachments, listAttachments } from "../repositories/attachments";
 import { findActiveOwnedPaste } from "../repositories/pastes";
+import { runWorkerEffect } from "../runtime";
 import { uploadAttachment } from "../services/attachment-upload";
 import { enqueuePendingDeletions, stageDeletion } from "../services/deletions";
 import { requireUser } from "../services/sessions";
@@ -18,7 +19,7 @@ attachmentRoutes.get("/api/attachments", requireUser, async (c) => {
 
 attachmentRoutes.get("/api/pastes/:id/files", requireUser, async (c) => {
   const pasteId = c.req.param("id")!;
-  const paste = await findActiveOwnedPaste(c.env.DB, pasteId, c.get("userId"));
+  const paste = await runWorkerEffect(c.env, findActiveOwnedPaste(pasteId, c.get("userId")));
   if (!paste) return c.json({ error: "Item not found" }, 404);
   return c.json({ attachments: await listAttachments(c.env.DB, pasteId) });
 });
@@ -71,7 +72,7 @@ attachmentRoutes.put("/api/pastes/:pasteId/files/:fileId", requireUser, async (c
 attachmentRoutes.get("/api/pastes/:pasteId/files/:fileId/content", requireUser, async (c) => {
   const pasteId = c.req.param("pasteId")!;
   const ownerId = c.get("userId");
-  if (!(await findActiveOwnedPaste(c.env.DB, pasteId, ownerId))) {
+  if (!(await runWorkerEffect(c.env, findActiveOwnedPaste(pasteId, ownerId)))) {
     return c.json({ error: "Item not found" }, 404);
   }
   const attachment = await c.env.DB.prepare(
@@ -88,7 +89,7 @@ attachmentRoutes.delete("/api/pastes/:pasteId/files/:fileId", requireUser, async
   const pasteId = c.req.param("pasteId")!;
   const fileId = c.req.param("fileId")!;
   const ownerId = c.get("userId");
-  if (!(await findActiveOwnedPaste(c.env.DB, pasteId, ownerId))) {
+  if (!(await runWorkerEffect(c.env, findActiveOwnedPaste(pasteId, ownerId)))) {
     return c.json({ error: "Item not found" }, 404);
   }
   const attachment = await c.env.DB.prepare(
