@@ -1,33 +1,11 @@
-import type { AppConfig } from "../../shared/protocol/config";
+import type { Effect } from "effect";
 
-let configPromise: Promise<AppConfig> | undefined;
-
-const loadConfig = async () => {
-  const [{ AppConfig: AppConfigSchema }, { requestApi }] = await Promise.all([
-    import("../../shared/schema/config"),
-    import("../effect/runtime"),
-  ]);
-  return requestApi("/api/config", AppConfigSchema);
-};
-
+/** Lazy host adapter keeps Effect and its schemas out of the initial bundle. */
 export function appConfig(signal?: AbortSignal) {
-  if (!configPromise) {
-    // The request is shared across React hosts, so one caller must not abort it
-    // for every other caller. Each caller can still cancel its own wait below.
-    configPromise = loadConfig().catch((cause) => {
-      configPromise = undefined;
-      throw cause;
-    });
-  }
-  const sharedConfig = configPromise;
-  if (signal === undefined) return sharedConfig;
-  if (signal.aborted) return Promise.reject(signal.reason);
-
-  return new Promise<AppConfig>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    sharedConfig.then(resolve, reject).finally(() => {
-      signal.removeEventListener("abort", onAbort);
-    });
-  });
+  const options: Effect.RunOptions | undefined = signal === undefined
+    ? undefined
+    : { signal };
+  return import("../effect/config").then(({ runAppConfig }) =>
+    runAppConfig(options),
+  );
 }

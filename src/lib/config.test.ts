@@ -25,8 +25,12 @@ describe("runtime configuration", () => {
     await expect(appConfig()).rejects.toThrow("temporary failure");
     const first = appConfig();
     const second = appConfig();
+    const controller = new AbortController();
+    const canceled = appConfig(controller.signal);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
+    controller.abort();
+    await expect(canceled).rejects.toBeDefined();
     resolveResponse(Response.json(config));
     await expect(Promise.all([first, second])).resolves.toEqual([config, config]);
     expect(fetchMock).toHaveBeenCalledTimes(2);

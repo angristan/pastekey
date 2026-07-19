@@ -6,6 +6,12 @@ import type { WebAuthn } from "./webauthn";
 
 const apiRuntime = ManagedRuntime.make(ApiClientLive);
 
+/** Promise boundary for browser effects that require the API service. */
+export const runApiPromise = <A, E>(
+  effect: Effect.Effect<A, E, ApiClient>,
+  options?: Effect.RunOptions,
+): Promise<A> => apiRuntime.runPromise(effect, options);
+
 /** Promise boundary for service-free browser effects and compatibility adapters. */
 export const runClientPromise = <A, E>(
   effect: Effect.Effect<A, E>,
@@ -43,7 +49,7 @@ export const requestApi = <S extends Schema.ConstraintDecoder<unknown>>(
   path: string,
   schema: S,
   init?: RequestInit,
-): Promise<S["Type"]> => apiRuntime.runPromise(
+): Promise<S["Type"]> => runApiPromise(
   ApiClient.use((client) => client.request(path, schema, init)),
   { signal: init?.signal ?? undefined },
 );
