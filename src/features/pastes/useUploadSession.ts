@@ -8,7 +8,7 @@ import { requestApi } from "../../effect/runtime";
 import { ApiError } from "../../lib/api";
 import { encryptAttachment } from "../../lib/crypto";
 import { messageOf } from "../../lib/format";
-import { uploadWithRetry } from "../../lib/uploads";
+import { uploadWithRetry, uploadWithRetryEffect } from "../../lib/uploads";
 
 type UploadPhase = "pending" | "encrypting" | "uploading" | "retrying" | "complete" | "error";
 type EncryptedAttachment = Awaited<ReturnType<typeof encryptAttachment>>;
@@ -149,8 +149,10 @@ export const uploadSelectedFileEffect = Effect.fn("uploadSelectedFile")(function
   session,
   payloads,
   update,
-  dependencies = defaultDependencies,
+  dependencies: providedDependencies,
 }: UploadSelectedFileInput) {
+  const dependencies = providedDependencies ?? defaultDependencies;
+
   yield* Effect.sync(() => update({
     progress: 0,
     error: undefined,
@@ -171,31 +173,36 @@ export const uploadSelectedFileEffect = Effect.fn("uploadSelectedFile")(function
     }
 
     const retainedAttachment = attachment;
-    yield* Effect.sync(() => update({ phase: "uploading" }));
-    yield* fromUploadPromise(() => dependencies.upload(
-      `/api/pastes/${session.pasteId}/files/${retainedAttachment.id}`,
-      retainedAttachment.body,
-      retainedAttachment.headers,
-      {
-        onProgress: (loaded, reportedTotal) => {
-          const total = reportedTotal || retainedAttachment.body.byteLength;
-          update({
-            phase: "uploading",
-            progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
-          });
-        },
-        onRetry: (attempt, maxAttempts) => update({
-          phase: "retrying",
-          progress: 0,
-          attempt,
-          maxAttempts,
-        }),
-        confirmConflict: async () => {
-          const attachments = await dependencies.list(session.pasteId);
-          return attachments.some(({ id }) => id === retainedAttachment.id);
-        },
+    const path = `/api/pastes/${session.pasteId}/files/${retainedAttachment.id}`;
+    const callbacks = {
+      onProgress: (loaded: number, reportedTotal: number) => {
+        const total = reportedTotal || retainedAttachment.body.byteLength;
+        update({
+          phase: "uploading",
+          progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
+        });
       },
-    ));
+      onRetry: (attempt: number, maxAttempts: number) => update({
+        phase: "retrying",
+        progress: 0,
+        attempt,
+        maxAttempts,
+      }),
+      confirmConflict: async () => {
+        const attachments = await dependencies.list(session.pasteId);
+        return attachments.some(({ id }) => id === retainedAttachment.id);
+      },
+    };
+
+    yield* Effect.sync(() => update({ phase: "uploading" }));
+    yield* providedDependencies === undefined
+      ? uploadWithRetryEffect(path, retainedAttachment.body, retainedAttachment.headers, callbacks)
+      : fromUploadPromise(() => dependencies.upload(
+        path,
+        retainedAttachment.body,
+        retainedAttachment.headers,
+        callbacks,
+      ));
   });
 
   const result = yield* Effect.result(operation);

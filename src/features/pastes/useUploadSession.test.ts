@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "@effect/vitest";
+import { Effect, Fiber } from "effect";
 
 import { ApiStatusError } from "../../effect/api";
 import { ApiError } from "../../lib/api";
@@ -7,8 +8,28 @@ import {
   discardUploadSession,
   type SelectedFile,
   uploadSelectedFile,
+  uploadSelectedFileEffect,
   uploadUntilFailure,
 } from "./useUploadSession";
+
+class PendingXMLHttpRequest extends EventTarget {
+  static sends = 0;
+  static aborts = 0;
+
+  readonly upload = new EventTarget();
+  status = 0;
+  responseText = "";
+
+  open() {}
+  setRequestHeader() {}
+  send() {
+    PendingXMLHttpRequest.sends += 1;
+  }
+  abort() {
+    PendingXMLHttpRequest.aborts += 1;
+    this.dispatchEvent(new Event("abort"));
+  }
+}
 
 const payload = {
   id: "file-0000000000000001",
@@ -21,6 +42,12 @@ const payload = {
     "X-Pastekey-Metadata-IV": "AA",
   },
 };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  PendingXMLHttpRequest.sends = 0;
+  PendingXMLHttpRequest.aborts = 0;
+});
 
 describe("upload payload ownership", () => {
   it("retains retry payloads and releases completed payloads", () => {
@@ -67,6 +94,35 @@ describe("upload payload ownership", () => {
     expect(cache.size).toBe(0);
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ phase: "complete" }));
   });
+
+  it.effect("aborts the default upload when the outer effect is interrupted", () => Effect.gen(function*() {
+    vi.stubGlobal("XMLHttpRequest", PendingXMLHttpRequest);
+    const cache = createUploadPayloadCache();
+    cache.retain("selection", payload);
+    const pasteKey = yield* Effect.promise(() => crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt"],
+    ));
+
+    const fiber = yield* Effect.forkChild(uploadSelectedFileEffect({
+      selected: {
+        id: "selection",
+        file: new File(["content"], "file.txt"),
+        phase: "pending",
+        progress: 0,
+      },
+      session: { pasteId: "paste-000000000000001", pasteKey },
+      payloads: cache,
+      update: vi.fn(),
+    }));
+    yield* Effect.yieldNow;
+
+    expect(PendingXMLHttpRequest.sends).toBe(1);
+    yield* Fiber.interrupt(fiber);
+    expect(PendingXMLHttpRequest.aborts).toBe(1);
+    expect(cache.size).toBe(1);
+  }));
 
   it("stops before encrypting more files after the first failure", async () => {
     const files: SelectedFile[] = ["first", "failed", "not-started"].map((id) => ({

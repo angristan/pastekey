@@ -11,6 +11,14 @@ type UploadCallbacks = {
   confirmConflict?: () => Promise<boolean>;
 };
 
+export class UploadSetupError extends Schema.TaggedErrorClass<UploadSetupError>()(
+  "UploadSetupError",
+  {
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
 export class UploadReconciliationError extends Schema.TaggedErrorClass<UploadReconciliationError>()(
   "UploadReconciliationError",
   {
@@ -70,21 +78,21 @@ export const uploadEffect = Effect.fn("upload")(function*(
   headers: HeadersInit,
   onProgress: (loaded: number, total: number) => void,
 ) {
-  yield* Effect.callback<void, ApiStatusError>((resume) => {
+  yield* Effect.callback<void, ApiStatusError | UploadSetupError>((resume) => {
     let request: XMLHttpRequest;
     try {
       request = new XMLHttpRequest();
       request.open("PUT", path);
       new Headers(headers).forEach((value, name) => request.setRequestHeader(name, value));
     } catch (cause) {
-      resume(Effect.fail(ApiStatusError.make({
+      resume(Effect.fail(UploadSetupError.make({
         message: causeMessage(cause, "Upload could not be started."),
-        status: 0,
+        cause,
       })));
       return;
     }
 
-    const finish = (effect: Effect.Effect<void, ApiStatusError>) => {
+    const finish = (effect: Effect.Effect<void, ApiStatusError | UploadSetupError>) => {
       cleanup();
       resume(effect);
     };
@@ -124,9 +132,9 @@ export const uploadEffect = Effect.fn("upload")(function*(
     try {
       request.send(body);
     } catch (cause) {
-      finish(Effect.fail(ApiStatusError.make({
+      finish(Effect.fail(UploadSetupError.make({
         message: causeMessage(cause, "Upload could not be sent."),
-        status: 0,
+        cause,
       })));
     }
 
@@ -161,16 +169,21 @@ export const uploadWithRetryEffect = Effect.fn("uploadWithRetry")(function*(
 ) {
   const retrySchedule = Schedule.exponential("500 millis").pipe(
     Schedule.upTo({ times: MAX_UPLOAD_ATTEMPTS - 1 }),
-    Schedule.tap(({ attempt }) => waitUntilOnline().pipe(
-      Effect.tap(() => Effect.sync(() => callbacks.onRetry(attempt + 1, MAX_UPLOAD_ATTEMPTS))),
-    )),
   );
+  let attempt = 1;
 
   yield* uploadEffect(path, body, headers, callbacks.onProgress).pipe(
-    Effect.catch((error) => reconcileConflict(error, callbacks.confirmConflict)),
+    Effect.catchTag("ApiStatusError", (error) => reconcileConflict(error, callbacks.confirmConflict)),
     Effect.retry({
       schedule: retrySchedule,
-      while: isRetryable,
+      while: (error) => {
+        if (!isRetryable(error) || attempt >= MAX_UPLOAD_ATTEMPTS) return false;
+        attempt += 1;
+        return Effect.sync(() => callbacks.onRetry(attempt, MAX_UPLOAD_ATTEMPTS)).pipe(
+          Effect.andThen(waitUntilOnline()),
+          Effect.as(true),
+        );
+      },
     }),
   );
 });

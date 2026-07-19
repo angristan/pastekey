@@ -6,9 +6,12 @@ import { ApiStatusError } from "../effect/api";
 import { uploadEffect, uploadWithRetry, uploadWithRetryEffect } from "./uploads";
 
 type Outcome = { type: "error" } | { type: "pending" } | { type: "response"; status: number; body?: string };
+type SetupFailure = "construct" | "open" | "send";
 
 class FakeXMLHttpRequest extends EventTarget {
   static outcomes: Outcome[] = [];
+  static setupFailure: SetupFailure | undefined;
+  static constructions = 0;
   static sends = 0;
   static aborts = 0;
 
@@ -16,11 +19,20 @@ class FakeXMLHttpRequest extends EventTarget {
   status = 0;
   responseText = "";
 
-  open() {}
+  constructor() {
+    super();
+    FakeXMLHttpRequest.constructions += 1;
+    if (FakeXMLHttpRequest.setupFailure === "construct") throw new Error("construction failed");
+  }
+
+  open() {
+    if (FakeXMLHttpRequest.setupFailure === "open") throw new Error("open failed");
+  }
   setRequestHeader() {}
 
   send() {
     FakeXMLHttpRequest.sends += 1;
+    if (FakeXMLHttpRequest.setupFailure === "send") throw new Error("send failed");
     queueMicrotask(() => {
       const progress = new Event("progress");
       Object.defineProperties(progress, {
@@ -54,6 +66,8 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   FakeXMLHttpRequest.outcomes = [];
+  FakeXMLHttpRequest.setupFailure = undefined;
+  FakeXMLHttpRequest.constructions = 0;
   FakeXMLHttpRequest.sends = 0;
   FakeXMLHttpRequest.aborts = 0;
 });
@@ -104,7 +118,7 @@ describe("uploadWithRetry", () => {
     expect(FakeXMLHttpRequest.sends).toBe(3);
   }));
 
-  it.effect("waits for connectivity before applying retry backoff", () => Effect.gen(function*() {
+  it.effect("reports a retry before waiting for connectivity and backoff", () => Effect.gen(function*() {
     FakeXMLHttpRequest.outcomes = [
       { type: "error" },
       { type: "response", status: 201 },
@@ -113,16 +127,19 @@ describe("uploadWithRetry", () => {
     vi.stubGlobal("window", browserWindow);
     vi.stubGlobal("navigator", { onLine: false });
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    const onRetry = vi.fn();
 
     const fiber = yield* Effect.forkChild(uploadWithRetryEffect(
       "/upload",
       new Uint8Array(16),
       {},
-      { onProgress: vi.fn(), onRetry: vi.fn() },
+      { onProgress: vi.fn(), onRetry },
     ));
     yield* Effect.yieldNow;
     yield* flushMicrotasks();
 
+    expect(onRetry).toHaveBeenCalledWith(2, 3);
+    expect(FakeXMLHttpRequest.sends).toBe(1);
     yield* TestClock.adjust("4999 millis");
     expect(FakeXMLHttpRequest.sends).toBe(1);
     browserWindow.dispatchEvent(new Event("online"));
@@ -134,6 +151,27 @@ describe("uploadWithRetry", () => {
 
     expect(FakeXMLHttpRequest.sends).toBe(2);
   }));
+
+  it.each(["construct", "open", "send"] as const)(
+    "does not retry a synchronous %s failure",
+    async (setupFailure) => {
+      FakeXMLHttpRequest.setupFailure = setupFailure;
+      vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+      const onRetry = vi.fn();
+
+      const result = uploadWithRetry(
+        "/upload",
+        new Uint8Array(16),
+        {},
+        { onProgress: vi.fn(), onRetry },
+      );
+
+      await expect(result).rejects.toMatchObject({ _tag: "UploadSetupError" });
+      expect(FakeXMLHttpRequest.constructions).toBe(1);
+      expect(FakeXMLHttpRequest.sends).toBe(setupFailure === "send" ? 1 : 0);
+      expect(onRetry).not.toHaveBeenCalled();
+    },
+  );
 
   it("accepts a conflict only after confirming the exact attachment", async () => {
     vi.useFakeTimers();
