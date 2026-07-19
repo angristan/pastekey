@@ -1,8 +1,13 @@
-import { Effect, Schema } from "effect";
+import { Cause, Effect, Option, Schema } from "effect";
 
 import { DeletionMessage as DeletionMessageSchema } from "../../shared/schema/deletions";
-import { DeletionQueue, R2FileStorage } from "../platform/cloudflare";
-import { D1 } from "../platform/d1";
+import {
+  DeletionQueue,
+  R2FileStorage,
+  type R2FileStorageError,
+  type R2FileStorageOperation,
+} from "../platform/cloudflare";
+import { D1, type D1Error, type D1Operation } from "../platform/d1";
 import { runWorkerEffect } from "../runtime";
 import type { Bindings, DeletionMessage } from "../types";
 
@@ -207,6 +212,85 @@ const rescheduleDeadLetter = Effect.fn("Deletions.rescheduleDeadLetter")(
   },
 );
 
+type QueueFailureDiagnostic =
+  | {
+    readonly errorClass: "D1Error";
+    readonly operation: D1Operation;
+    readonly causeClass: string;
+  }
+  | {
+    readonly errorClass: "R2FileStorageError";
+    readonly operation: R2FileStorageOperation;
+    readonly causeClass: string;
+  }
+  | {
+    readonly errorClass: "Defect" | "Interrupt" | "UnknownCause";
+    readonly operation: "delete-ciphertext" | "reschedule-dead-letter";
+    readonly causeClass: string;
+  };
+
+type PrimaryDeletionDirective =
+  | { readonly _tag: "Acknowledge" }
+  | { readonly _tag: "DiscardInvalid" }
+  | {
+    readonly _tag: "Retry";
+    readonly delaySeconds: 60;
+    readonly diagnostic: QueueFailureDiagnostic;
+  };
+
+type DeadLetterDirective =
+  | { readonly _tag: "Acknowledge"; readonly scheduled: { readonly cycle: number; readonly delayHours: number } | null }
+  | { readonly _tag: "DiscardInvalid" }
+  | {
+    readonly _tag: "Retry";
+    readonly delaySeconds: 300;
+    readonly diagnostic: QueueFailureDiagnostic;
+  };
+
+type QueueProcessingError = D1Error | R2FileStorageError;
+
+const processPrimaryDeletion: (
+  value: unknown,
+) => Effect.Effect<PrimaryDeletionDirective, never, D1 | R2FileStorage> =
+  Effect.fn("Deletions.processPrimaryDeletion")(function* (value: unknown) {
+    return yield* Schema.decodeUnknownEffect(DeletionMessageSchema)(value).pipe(
+      Effect.matchEffect({
+        onFailure: () => Effect.succeed({ _tag: "DiscardInvalid" } as const),
+        onSuccess: (body) => deleteQueuedCiphertext(body.jobId).pipe(
+          Effect.matchCause({
+            onFailure: (cause) => ({
+              _tag: "Retry" as const,
+              delaySeconds: 60 as const,
+              diagnostic: queueFailureDiagnostic(cause, "delete-ciphertext"),
+            }),
+            onSuccess: () => ({ _tag: "Acknowledge" as const }),
+          }),
+        ),
+      }),
+    );
+  });
+
+const processDeadLetter: (
+  value: unknown,
+) => Effect.Effect<DeadLetterDirective, never, D1> =
+  Effect.fn("Deletions.processDeadLetter")(function* (value: unknown) {
+    return yield* Schema.decodeUnknownEffect(DeletionMessageSchema)(value).pipe(
+      Effect.matchEffect({
+        onFailure: () => Effect.succeed({ _tag: "DiscardInvalid" } as const),
+        onSuccess: (body) => rescheduleDeadLetter(body).pipe(
+          Effect.matchCause({
+            onFailure: (cause) => ({
+              _tag: "Retry" as const,
+              delaySeconds: 300 as const,
+              diagnostic: queueFailureDiagnostic(cause, "reschedule-dead-letter"),
+            }),
+            onSuccess: (scheduled) => ({ _tag: "Acknowledge" as const, scheduled }),
+          }),
+        ),
+      }),
+    );
+  });
+
 /** Cloudflare Queue host adapter; message ack and retry stay outside Effect. */
 export async function consumeDeletionQueue(
   batch: MessageBatch<unknown>,
@@ -230,21 +314,22 @@ async function consumePrimaryDeletions(
   env: Bindings,
 ) {
   for (const message of batch.messages) {
-    const body = await decodeDeletionMessage(message.body, env);
-    if (body === null) {
-      console.error("Discarding invalid ciphertext deletion message");
-      message.ack();
-      continue;
-    }
-
-    try {
-      await runWorkerEffect(env, deleteQueuedCiphertext(body.jobId));
-      message.ack();
-    } catch {
-      console.error("Queued ciphertext deletion failed", {
-        attempt: message.attempts,
-      });
-      message.retry({ delaySeconds: 60 });
+    const directive = await runWorkerEffect(env, processPrimaryDeletion(message.body));
+    switch (directive._tag) {
+      case "Acknowledge":
+        message.ack();
+        break;
+      case "DiscardInvalid":
+        console.error("Discarding invalid ciphertext deletion message");
+        message.ack();
+        break;
+      case "Retry":
+        console.error("Queued ciphertext deletion failed", {
+          attempt: message.attempts,
+          ...directive.diagnostic,
+        });
+        message.retry({ delaySeconds: directive.delaySeconds });
+        break;
     }
   }
 }
@@ -254,38 +339,72 @@ async function consumeDeadLetters(
   env: Bindings,
 ) {
   for (const message of batch.messages) {
-    const body = await decodeDeletionMessage(message.body, env);
-    if (body === null) {
-      console.error("Discarding invalid ciphertext deletion dead letter");
-      message.ack();
-      continue;
-    }
-
-    try {
-      const scheduled = await runWorkerEffect(env, rescheduleDeadLetter(body));
-      if (scheduled !== null) {
-        console.error("Ciphertext deletion scheduled for another retry cycle", scheduled);
-      }
-      message.ack();
-    } catch {
-      console.error("Could not persist ciphertext deletion dead letter", {
-        attempt: message.attempts,
-      });
-      message.retry({ delaySeconds: 300 });
+    const directive = await runWorkerEffect(env, processDeadLetter(message.body));
+    switch (directive._tag) {
+      case "Acknowledge":
+        if (directive.scheduled !== null) {
+          console.error("Ciphertext deletion scheduled for another retry cycle", directive.scheduled);
+        }
+        message.ack();
+        break;
+      case "DiscardInvalid":
+        console.error("Discarding invalid ciphertext deletion dead letter");
+        message.ack();
+        break;
+      case "Retry":
+        console.error("Could not persist ciphertext deletion dead letter", {
+          attempt: message.attempts,
+          ...directive.diagnostic,
+        });
+        message.retry({ delaySeconds: directive.delaySeconds });
+        break;
     }
   }
 }
 
-function decodeDeletionMessage(value: unknown, env: Bindings) {
-  return runWorkerEffect(
-    env,
-    Schema.decodeUnknownEffect(DeletionMessageSchema)(value).pipe(
-      Effect.match({
-        onFailure: () => null,
-        onSuccess: (message) => message,
-      }),
-    ),
-  );
+function queueFailureDiagnostic(
+  cause: Cause.Cause<QueueProcessingError>,
+  fallbackOperation: "delete-ciphertext" | "reschedule-dead-letter",
+): QueueFailureDiagnostic {
+  return Option.match(Cause.findErrorOption(cause), {
+    onNone: () => ({
+      errorClass: Cause.hasInterrupts(cause)
+        ? "Interrupt" as const
+        : Cause.hasDies(cause)
+        ? "Defect" as const
+        : "UnknownCause" as const,
+      operation: fallbackOperation,
+      causeClass: safeCauseClass(Cause.squash(cause)),
+    }),
+    onSome: typedFailureDiagnostic,
+  });
+}
+
+function typedFailureDiagnostic(error: QueueProcessingError): QueueFailureDiagnostic {
+  if (error._tag === "D1Error") {
+    return {
+      errorClass: error._tag,
+      operation: error.operation,
+      causeClass: safeCauseClass(error.cause),
+    };
+  }
+  return {
+    errorClass: error._tag,
+    operation: error.operation,
+    causeClass: safeCauseClass(error.cause),
+  };
+}
+
+function safeCauseClass(cause: unknown): string {
+  if (cause instanceof EvalError) return "EvalError";
+  if (cause instanceof RangeError) return "RangeError";
+  if (cause instanceof ReferenceError) return "ReferenceError";
+  if (cause instanceof SyntaxError) return "SyntaxError";
+  if (cause instanceof TypeError) return "TypeError";
+  if (cause instanceof URIError) return "URIError";
+  if (cause instanceof Error) return "Error";
+  if (cause === null) return "null";
+  return typeof cause;
 }
 
 function cycleOf(message: DeletionMessage) {

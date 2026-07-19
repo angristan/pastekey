@@ -23,7 +23,7 @@ describe("deletion queue failures", () => {
   });
 
   it("retries without losing the durable deletion job", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await bindings.DB.prepare(
       `INSERT INTO deletion_jobs (id, owner_id, object_key, ciphertext_size, created_at, queued_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -45,6 +45,44 @@ describe("deletion queue failures", () => {
 
     expect(result.retryMessages).toHaveLength(1);
     expect(await bindings.DB.prepare("SELECT id FROM deletion_jobs WHERE id = ?").bind(jobId).first()).not.toBeNull();
+    expect(consoleError).toHaveBeenCalledWith("Queued ciphertext deletion failed", {
+      attempt: 1,
+      errorClass: "R2FileStorageError",
+      operation: "delete",
+      causeClass: "Error",
+    });
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(jobId);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(objectKey);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("simulated R2 failure");
+  });
+
+  it("retries dead letters with privacy-safe D1 failure details", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const batch = createMessageBatch<DeletionMessage>("pastekey-deletions-dlq", [
+      { id: "failed-dead-letter", timestamp: new Date(), attempts: 2, body: { jobId, cycle: 0 } },
+    ]);
+    const context = createExecutionContext();
+    const failingEnv = {
+      ...bindings,
+      DB: {
+        prepare() {
+          throw new TypeError(`simulated D1 failure for ${jobId}`);
+        },
+      },
+    } as unknown as Bindings;
+
+    await consumeDeletionQueue(batch, failingEnv);
+    const result = await getQueueResult(batch, context);
+
+    expect(result.retryMessages).toHaveLength(1);
+    expect(consoleError).toHaveBeenCalledWith("Could not persist ciphertext deletion dead letter", {
+      attempt: 2,
+      errorClass: "D1Error",
+      operation: "prepare",
+      causeClass: "TypeError",
+    });
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(jobId);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("simulated D1 failure");
   });
 
   it("turns dead letters into delayed retry cycles", async () => {
