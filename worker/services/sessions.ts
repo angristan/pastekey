@@ -66,20 +66,32 @@ export const findCurrentUser = Effect.fn("findCurrentUser")(
   },
 );
 
+export const createSessionMaterial = Effect.fn("createSessionMaterial")(
+  function*(now = Date.now()) {
+    const token = randomId(32);
+    const id = yield* hashedToken(token);
+    return {
+      token,
+      id,
+      createdAt: now,
+      expiresAt: now + SESSION_TTL_SECONDS * 1000,
+    };
+  },
+);
+
 export const createSessionToken = Effect.fn("createSessionToken")(
   function*(userId: string, now = Date.now()) {
     const d1 = yield* D1;
-    const token = randomId(32);
-    const id = yield* hashedToken(token);
+    const session = yield* createSessionMaterial(now);
     const result = yield* d1.run(
       d1.bind(
         d1.prepare(
           `INSERT INTO sessions (id, user_id, created_at, expires_at)
            SELECT ?, id, ?, ? FROM users WHERE id = ? AND deletion_requested_at IS NULL`,
         ),
-        id,
-        now,
-        now + SESSION_TTL_SECONDS * 1000,
+        session.id,
+        session.createdAt,
+        session.expiresAt,
         userId,
       ),
     );
@@ -89,7 +101,7 @@ export const createSessionToken = Effect.fn("createSessionToken")(
         message: "Account is unavailable",
       });
     }
-    return token;
+    return session.token;
   },
 );
 

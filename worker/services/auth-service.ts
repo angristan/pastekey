@@ -16,6 +16,7 @@ import {
   type ChallengeRow,
 } from "./auth-ceremonies";
 import {
+  createSessionMaterial,
   createSessionToken,
   findCurrentUser,
   SessionError,
@@ -32,16 +33,18 @@ const CredentialDescriptorRow = Schema.Struct({
   transports: Schema.String,
 });
 
-const CredentialRow = Schema.Struct({
-  id: Schema.String,
-  user_id: Schema.String,
-  public_key: Schema.String,
+const LoginContextRow = Schema.Struct({
+  ceremonyId: Schema.String,
+  challenge: Schema.String,
+  ceremonyUserId: Schema.Union([Schema.String, Schema.Null]),
+  credentialActive: Schema.Literals([0, 1]),
+  credentialId: Schema.String,
+  userId: Schema.String,
+  publicKey: Schema.String,
   counter: Schema.Number,
   transports: Schema.String,
-  device_type: Schema.String,
-  backed_up: Schema.Number,
-  wrapped_account_key: Schema.String,
-  wrapped_account_key_iv: Schema.String,
+  wrappedAccountKey: Schema.String,
+  wrappedAccountKeyIv: Schema.String,
 });
 
 const PasskeyRow = Schema.Struct({
@@ -266,48 +269,57 @@ export const startLogin = Effect.fn("startLogin")(
   },
 );
 
-export const findLoginCeremony = Effect.fn("findLoginCeremony")(
-  function*(id: string | undefined) {
-    return id ? yield* findCeremony(id, ["login"]) : null;
-  },
-);
-
 export const finishLogin = Effect.fn("finishLogin")(
   function*(
     verifiers: AuthVerifiers,
     input: {
-      readonly ceremony: ChallengeRow;
+      readonly ceremonyId: string | undefined;
       readonly credential: AuthenticationResponseJSON;
       readonly rpID: string;
       readonly origin: string;
     },
   ) {
+    if (!input.ceremonyId) return yield* fail(400, "Sign-in ceremony expired");
+
     const d1 = yield* D1;
-    const stored = yield* d1.first(
+    const lookupAt = Date.now();
+    const context = yield* d1.first(
       d1.bind(
         d1.prepare(
-          `SELECT c.* FROM credentials c JOIN users u ON u.id = c.user_id
-           WHERE c.id = ? AND u.deletion_requested_at IS NULL`,
+          `SELECT a.id AS ceremonyId, a.challenge, a.user_id AS ceremonyUserId,
+       CASE WHEN u.id IS NULL THEN 0 ELSE 1 END AS credentialActive,
+       COALESCE(c.id, '') AS credentialId, COALESCE(c.user_id, '') AS userId,
+       COALESCE(c.public_key, '') AS publicKey, COALESCE(c.counter, 0) AS counter,
+       COALESCE(c.transports, '[]') AS transports,
+       COALESCE(c.wrapped_account_key, '') AS wrappedAccountKey,
+       COALESCE(c.wrapped_account_key_iv, '') AS wrappedAccountKeyIv
+     FROM auth_challenges a
+     LEFT JOIN credentials c ON c.id = ?
+     LEFT JOIN users u ON u.id = c.user_id AND u.deletion_requested_at IS NULL
+     WHERE a.id = ? AND a.kind = 'login' AND a.expires_at > ?`,
         ),
         input.credential.id,
+        input.ceremonyId,
+        lookupAt,
       ),
-      CredentialRow,
+      LoginContextRow,
     );
-    if (!stored) return yield* fail(401, "Unknown passkey");
-    if (input.ceremony.user_id && input.ceremony.user_id !== stored.user_id) {
+    if (!context) return yield* fail(400, "Sign-in ceremony expired");
+    if (!context.credentialActive) return yield* fail(401, "Unknown passkey");
+    if (context.ceremonyUserId && context.ceremonyUserId !== context.userId) {
       return yield* fail(401, "Passkey does not belong to the active account");
     }
 
     const verification = yield* verifiers.verifyAuthentication({
       response: input.credential,
-      expectedChallenge: input.ceremony.challenge,
+      expectedChallenge: context.challenge,
       expectedOrigin: input.origin,
       expectedRPID: input.rpID,
       credential: {
-        id: stored.id,
-        publicKey: fromBase64Url(stored.public_key),
-        counter: stored.counter,
-        transports: parseTransports(stored.transports),
+        id: context.credentialId,
+        publicKey: fromBase64Url(context.publicKey),
+        counter: context.counter,
+        transports: parseTransports(context.transports),
       },
       requireUserVerification: true,
     }).pipe(
@@ -316,28 +328,75 @@ export const finishLogin = Effect.fn("finishLogin")(
     );
     if (!verification.verified) return yield* fail(401, "Passkey sign-in failed");
 
-    yield* d1.batch([
+    const session = yield* createSessionMaterial();
+    const results = yield* d1.batch([
       d1.bind(
-        d1.prepare("UPDATE credentials SET counter = ?, last_used_at = ? WHERE id = ?"),
+        d1.prepare(
+          `UPDATE credentials SET counter = ?, last_used_at = ?
+     WHERE id = ? AND user_id = ?
+       AND EXISTS (SELECT 1 FROM users WHERE id = ? AND deletion_requested_at IS NULL)
+       AND EXISTS (
+         SELECT 1 FROM auth_challenges
+         WHERE id = ? AND kind = 'login' AND expires_at > ?
+           AND (user_id IS NULL OR user_id = ?)
+       )`,
+        ),
         verification.authenticationInfo.newCounter,
-        Date.now(),
-        stored.id,
+        session.createdAt,
+        context.credentialId,
+        context.userId,
+        context.userId,
+        context.ceremonyId,
+        session.createdAt,
+        context.userId,
       ),
       d1.bind(
-        d1.prepare("DELETE FROM auth_challenges WHERE id = ?"),
-        input.ceremony.id,
+        d1.prepare(
+          `INSERT INTO sessions (id, user_id, created_at, expires_at)
+     SELECT ?, c.user_id, ?, ?
+     FROM credentials c JOIN users u ON u.id = c.user_id
+     WHERE c.id = ? AND c.user_id = ? AND u.deletion_requested_at IS NULL
+       AND EXISTS (
+         SELECT 1 FROM auth_challenges
+         WHERE id = ? AND kind = 'login' AND expires_at > ?
+           AND (user_id IS NULL OR user_id = c.user_id)
+       )`,
+        ),
+        session.id,
+        session.createdAt,
+        session.expiresAt,
+        context.credentialId,
+        context.userId,
+        context.ceremonyId,
+        session.createdAt,
+      ),
+      d1.bind(
+        d1.prepare(
+          "DELETE FROM auth_challenges WHERE id = ? AND kind = 'login' AND expires_at > ?",
+        ),
+        context.ceremonyId,
+        session.createdAt,
       ),
     ]);
-    const sessionToken = yield* createSessionToken(stored.user_id);
+    const sessionCreated = Boolean(results[1]?.meta.changes);
+    const challengeConsumed = Boolean(results[2]?.meta.changes);
+    if (!sessionCreated || !challengeConsumed) {
+      if (!challengeConsumed) return yield* fail(400, "Sign-in ceremony expired");
+      return yield* SessionError.make({
+        operation: "create",
+        message: "Account is unavailable",
+      });
+    }
+
     const response: AuthSuccess = {
-      userId: stored.user_id,
-      credentialId: stored.id,
+      userId: context.userId,
+      credentialId: context.credentialId,
       wrappedAccountKey: {
-        ciphertext: stored.wrapped_account_key,
-        iv: stored.wrapped_account_key_iv,
+        ciphertext: context.wrappedAccountKey,
+        iv: context.wrappedAccountKeyIv,
       },
     };
-    return { response, sessionToken };
+    return { response, sessionToken: session.token };
   },
 );
 
