@@ -1,5 +1,38 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import type { AccountDeletionPayload, DeletionMessage } from "../types";
+import type { AccountDeletionPayload, DeletionMessage, FlagshipBinding } from "../types";
+
+export class FeatureFlagError extends Schema.TaggedErrorClass<FeatureFlagError>()(
+  "FeatureFlagError",
+  {
+    flagKey: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
+export class FeatureFlags extends Context.Service<
+  FeatureFlags,
+  {
+    readonly getBooleanValue: (
+      flagKey: string,
+      defaultValue: boolean,
+      context?: FlagshipEvaluationContext,
+    ) => Effect.Effect<boolean, FeatureFlagError>;
+  }
+>()("pastekey/platform/FeatureFlags") {}
+
+export const makeFeatureFlags = (
+  binding: FlagshipBinding,
+): Context.Service.Shape<typeof FeatureFlags> => ({
+  getBooleanValue: (flagKey, defaultValue, context) =>
+    Effect.tryPromise({
+      try: () => binding.getBooleanValue(flagKey, defaultValue, context),
+      catch: (cause) => FeatureFlagError.make({ flagKey, cause }),
+    }),
+});
+
+export const featureFlagsLayer = (
+  binding: FlagshipBinding,
+): Layer.Layer<FeatureFlags> => Layer.succeed(FeatureFlags, makeFeatureFlags(binding));
 
 export type R2FileValue = Parameters<R2Bucket["put"]>[1];
 

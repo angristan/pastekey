@@ -136,7 +136,7 @@ describe("authentication contracts", () => {
 });
 
 describe("configuration contract", () => {
-  it("requires every limit and preserves a null site key", () => {
+  it("requires every limit and preserves registration and site-key state", () => {
     const config = {
       limits: {
         maxFileBytes: 1,
@@ -144,6 +144,7 @@ describe("configuration contract", () => {
         maxPastesPerUser: 3,
         maxStorageBytes: 4,
       },
+      registrationEnabled: true,
       turnstileSiteKey: null,
     };
 

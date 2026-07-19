@@ -29,9 +29,9 @@ describe("Worker composition", () => {
     await expect(response.text()).resolves.toContain("<title>Pastekey");
   });
 
-  it("exposes cacheable limits and the production Turnstile site key", async () => {
+  it("exposes cacheable limits, flags, and the production Turnstile site key", async () => {
     const response = await worker.fetch(new Request("https://paste.test/api/config"), env(), context);
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=300");
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=30");
     await expect(response.json()).resolves.toEqual({
       limits: {
         maxFileBytes: 1024,
@@ -39,6 +39,7 @@ describe("Worker composition", () => {
         maxPastesPerUser: 3,
         maxStorageBytes: 4096,
       },
+      registrationEnabled: true,
       turnstileSiteKey: "site-key",
     });
   });
@@ -50,17 +51,20 @@ describe("Worker composition", () => {
   });
 });
 
-function env(): Bindings {
+function env(registrationEnabled = true): Bindings {
   return {
     ASSETS: {
       fetch: async () => new Response("<!doctype html><title>Pastekey — Private, encrypted sharing</title>", {
         headers: { "Content-Type": "text/html; charset=UTF-8" },
       }),
     } as unknown as Fetcher,
+    FLAGS: {
+      getBooleanValue: () => Promise.resolve(registrationEnabled),
+    },
     MAX_FILE_BYTES: "1024",
     MAX_FILES_PER_PASTE: "2",
     MAX_PASTES_PER_USER: "3",
     MAX_STORAGE_BYTES: "4096",
     TURNSTILE_SITE_KEY: "site-key",
-  } as Bindings;
+  } as unknown as Bindings;
 }

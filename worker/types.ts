@@ -8,10 +8,19 @@ import type {
 export type AccountDeletionPayload = typeof AccountDeletionPayloadSchema.Encoded;
 export type DeletionMessage = typeof DeletionMessageSchema.Encoded;
 
+export interface FlagshipBinding {
+  readonly getBooleanValue: (
+    flagKey: string,
+    defaultValue: boolean,
+    context?: FlagshipEvaluationContext,
+  ) => Promise<boolean>;
+}
+
 export type Bindings = {
   DB: D1Database;
   FILES: R2Bucket;
   EVENTS: AnalyticsEngineDataset;
+  FLAGS: FlagshipBinding;
   DELETION_QUEUE: Queue<DeletionMessage>;
   ACCOUNT_DELETION: Workflow<AccountDeletionPayload>;
   ASSETS: Fetcher;

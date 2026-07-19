@@ -22,10 +22,11 @@ const userId = "auth-user-000000000001";
 const otherUserId = "auth-user-000000000002";
 const authenticationVerifier = vi.fn<typeof verifyAuthentication>();
 const registrationVerifier = vi.fn<typeof verifyRegistration>();
+const registrationAvailability = vi.fn(() => Effect.succeed(true));
 const testRoutes = createAuthRoutes({
   verifyAuthentication: authenticationVerifier,
   verifyRegistration: registrationVerifier,
-});
+}, registrationAvailability);
 
 describe("authentication ceremonies", () => {
   afterEach(async () => {
@@ -38,6 +39,36 @@ describe("authentication ceremonies", () => {
     await bindings.DB.prepare("DELETE FROM auth_challenges").run();
     authenticationVerifier.mockReset();
     registrationVerifier.mockReset();
+    registrationAvailability.mockReset();
+    registrationAvailability.mockReturnValue(Effect.succeed(true));
+  });
+
+  it("rejects registration options and verification while registrations are paused", async () => {
+    const options = await request("/api/auth/register/options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(options.status).toBe(200);
+
+    registrationAvailability.mockReturnValue(Effect.succeed(false));
+    const blockedOptions = await request("/api/auth/register/options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(blockedOptions.status).toBe(503);
+    await expect(blockedOptions.json()).resolves.toEqual({
+      error: "New vault registrations are temporarily paused",
+    });
+
+    const blockedVerification = await request("/api/auth/register/verify", {
+      method: "POST",
+      headers: { Cookie: ceremonyCookie(options), "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(blockedVerification.status).toBe(503);
+    expect(registrationVerifier).not.toHaveBeenCalled();
   });
 
   it("rejects malformed and structurally invalid ceremony payloads", async () => {

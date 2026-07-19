@@ -33,6 +33,10 @@ import {
 } from "../services/auth-service";
 import { CEREMONY_TTL_SECONDS } from "../services/auth-ceremonies";
 import {
+  registrationEnabled,
+  type RegistrationAvailability,
+} from "../services/feature-flags";
+import {
   cookieOptions,
   deleteSessionToken,
   requireUser,
@@ -64,10 +68,21 @@ const runAuth = <A>(
 
 export function createAuthRoutes(
   verifiers: AuthVerifiers = defaultAuthVerifiers,
+  isRegistrationEnabled: RegistrationAvailability = registrationEnabled,
 ) {
   const authRoutes = new Hono<AppEnv>();
 
+  const rejectPausedRegistration = async (c: AppContext) => {
+    const enabled = await runWorkerEffect(c.env, isRegistrationEnabled());
+    return enabled
+      ? null
+      : c.json({ error: "New vault registrations are temporarily paused" }, 503);
+  };
+
   authRoutes.post("/api/auth/register/options", async (c) => {
+    const unavailable = await rejectPausedRegistration(c);
+    if (unavailable) return unavailable;
+
     const sessionToken = getCookie(c, SESSION_COOKIE);
     const availability = await runAuth(c, ensureInitialRegistrationAllowed(sessionToken));
     if (!availability.ok) {
@@ -108,6 +123,9 @@ export function createAuthRoutes(
   });
 
   authRoutes.post("/api/auth/register/verify", async (c) => {
+    const unavailable = await rejectPausedRegistration(c);
+    if (unavailable) return unavailable;
+
     const ceremony = await runWorkerEffect(
       c.env,
       findRegistrationCeremony(getCookie(c, CEREMONY_COOKIE)),

@@ -24,6 +24,13 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+  "flagship": [
+    {
+      "binding": "FLAGS",
+      "app_id": "3208d94d-7769-49f0-b58e-7bc442548728",
+      "remote": true
+    }
+  ],
   "routes": [
     {
       "pattern": "paste.stanislas.cloud",

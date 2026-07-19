@@ -5,5 +5,6 @@ export type AppConfig = {
     maxPastesPerUser: number;
     maxStorageBytes: number;
   };
+  registrationEnabled: boolean;
   turnstileSiteKey: string | null;
 };

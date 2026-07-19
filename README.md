@@ -69,6 +69,7 @@ Cloudflare Worker (Hono host + Effect services)
   ├── R2: encrypted attachment bodies
   ├── Queues + DLQ: retryable routine deletion
   ├── Workflows: durable account deletion
+  ├── Flagship: new-account registration control
   └── Analytics Engine: identifier-free operational events
 ```
 
@@ -103,7 +104,7 @@ D1 conditional writes and upload reservations enforce item, file-count, and stor
 ## Requirements and compatibility
 
 - [Bun](https://bun.sh/)
-- A Cloudflare account with Workers, D1, R2, Queues, Workflows, Analytics Engine, Turnstile, and Workers Rate Limiting
+- A Cloudflare account with Workers, D1, R2, Queues, Workflows, Analytics Engine, Flagship, Turnstile, and Workers Rate Limiting
 - A browser and passkey provider that expose the **WebAuthn PRF extension**
 
 Ordinary passkey support is not enough; PRF support is mandatory. Test every browser/device combination you intend to rely on, and register a backup passkey where possible.
@@ -120,6 +121,8 @@ bun run dev
 
 Open the printed localhost URL. WebAuthn works on `localhost`, and Turnstile is bypassed locally when `TURNSTILE_SECRET_KEY` is absent. Local D1 state is stored under `.wrangler/`.
 
+Flagship has no local flag store. `wrangler dev` evaluates against the live Flagship app configured by `app_id`; use a dedicated development app when production flag changes would be inappropriate.
+
 ## Self-hosting
 
 > [!WARNING]
@@ -133,6 +136,8 @@ bunx wrangler d1 create pastekey
 bunx wrangler r2 bucket create pastekey-files
 bunx wrangler queues create pastekey-deletions
 bunx wrangler queues create pastekey-deletions-dlq
+bunx wrangler flagship apps create pastekey
+bunx wrangler flagship flags create <FLAGSHIP_APP_ID> registration-enabled --type boolean --default off --rule "serve=on; when=service equals pastekey"
 ```
 
 Copy the new D1 database ID into `wrangler.jsonc`. Keep the `pastekey` database name or update the database name used by the migration scripts in `package.json`.
@@ -144,6 +149,7 @@ Update `wrangler.jsonc`:
 - Custom domain and `ORIGIN`
 - WebAuthn `RP_ID` and display `RP_NAME`
 - D1 database ID and R2 bucket name
+- Flagship app ID for the `FLAGS` binding
 - Queue and dead-letter queue names
 - Analytics Engine dataset and Workflow name
 - Unique rate-limit namespace IDs
@@ -177,6 +183,8 @@ The supported deployment command audits dependencies, runs type checking and the
 | `DELETION_DLQ_NAME` | `pastekey-deletions-dlq` | Deletion dead-letter queue identity |
 
 `TURNSTILE_SECRET_KEY` is the only Worker secret. Do not commit it.
+
+The `registration-enabled` Flagship boolean controls initial account registration only. Disable the flag to hide registration in newly loaded clients and reject both registration ceremony endpoints; sign-in and backup-passkey registration remain available. The default variant is deliberately `off`, while an enabled targeting rule serves `on`, so Flagship's enable/disable toggle acts as the kill switch. Evaluation defaults to enabled if Flagship is unavailable.
 
 The configured rate limits are 20 authentication mutations and 30 write mutations per 60 seconds. Reads and downloads are not rate limited by the application.
 

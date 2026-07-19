@@ -45,7 +45,7 @@ export function Landing({
           <p className="hero-description">
             Paste text or upload files. Everything is encrypted in your browser and unlocked with your passkey—the server only stores ciphertext.
           </p>
-          {config.turnstileSiteKey && (
+          {config.registrationEnabled && config.turnstileSiteKey && (
             <Turnstile key={challengeVersion} siteKey={config.turnstileSiteKey} onToken={setTurnstileToken} />
           )}
           <div className="hero-actions">
@@ -54,10 +54,14 @@ export function Landing({
               size="lg"
               icon={PlusIcon}
               loading={busy === "register"}
-              disabled={busy !== null || Boolean(config.turnstileSiteKey && !turnstileToken)}
+              disabled={
+                !config.registrationEnabled
+                || busy !== null
+                || Boolean(config.turnstileSiteKey && !turnstileToken)
+              }
               onClick={register}
             >
-              Create a vault
+              {config.registrationEnabled ? "Create a vault" : "Registrations paused"}
             </Button>
             <Button
               size="lg"

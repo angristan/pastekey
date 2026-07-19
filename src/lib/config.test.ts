@@ -10,6 +10,7 @@ const config: AppConfig = {
     maxPastesPerUser: 3,
     maxStorageBytes: 4096,
   },
+  registrationEnabled: true,
   turnstileSiteKey: null,
 };
 

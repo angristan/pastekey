@@ -11,5 +11,6 @@ export class ServiceLimits extends Schema.Class<ServiceLimits>("ServiceLimits")(
 
 export class AppConfig extends Schema.Class<AppConfig>("AppConfig")({
   limits: ServiceLimits,
+  registrationEnabled: Schema.Boolean,
   turnstileSiteKey: Schema.Union([Schema.String, Schema.Null]),
 }) {}

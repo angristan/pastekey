@@ -16,6 +16,7 @@ import { runWorkerEffect } from "./runtime";
 import { reconcileAccountDeletionsEffect } from "./services/account-deletions";
 import { cleanupExpired } from "./services/cleanup";
 import { consumeDeletionQueue } from "./services/deletions";
+import { registrationEnabled } from "./services/feature-flags";
 import { recordLifecycleMetrics } from "./services/lifecycle-metrics";
 import type { AppEnv, Bindings, DeletionMessage } from "./types";
 
@@ -47,12 +48,13 @@ app.on(["GET", "HEAD"], "/s/:id", async (c) => {
 });
 
 app.get("/api/health", (c) => c.json({ ok: true }));
-app.get("/api/config", (c) => {
-  c.header("Cache-Control", "public, max-age=300");
+app.get("/api/config", async (c) => {
+  c.header("Cache-Control", "public, max-age=30");
   const hostname = new URL(c.req.url).hostname;
   const localWithoutSecret = (hostname === "localhost" || hostname === "127.0.0.1") && !c.env.TURNSTILE_SECRET_KEY;
   return c.json<AppConfig>({
     limits: serviceLimits(c.env),
+    registrationEnabled: await runWorkerEffect(c.env, registrationEnabled()),
     turnstileSiteKey: localWithoutSecret ? null : (c.env.TURNSTILE_SITE_KEY ?? null),
   });
 });
