@@ -1,30 +1,76 @@
-import type { AppContext } from "../types";
+import { Effect, Schema } from "effect";
 
-export async function verifyTurnstile(c: AppContext, token: string | undefined) {
-  if (!c.env.TURNSTILE_SECRET_KEY) {
-    const hostname = new URL(c.req.url).hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") return { ok: true } as const;
-    return { ok: false, status: 503 as const, error: "Registration protection is not configured" };
-  }
-  if (!token || token.length > 2048) {
-    return { ok: false, status: 400 as const, error: "Complete the human verification first" };
-  }
+const TurnstileResponse = Schema.Struct({
+  success: Schema.Boolean,
+  hostname: Schema.optionalKey(Schema.String),
+});
 
-  const form = new FormData();
-  form.set("secret", c.env.TURNSTILE_SECRET_KEY);
-  form.set("response", token);
-  const ip = c.req.header("CF-Connecting-IP");
-  if (ip) form.set("remoteip", ip);
+export class TurnstileError extends Schema.TaggedErrorClass<TurnstileError>()("TurnstileError", {
+  cause: Schema.Defect(),
+}) {}
 
-  try {
-    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-      method: "POST",
-      body: form,
-    });
-    const result = await response.json<{ success: boolean; hostname?: string }>();
-    if (result.success && (!c.env.RP_ID || result.hostname === c.env.RP_ID)) return { ok: true } as const;
-  } catch (error) {
-    console.error("Turnstile verification failed", error);
-  }
-  return { ok: false, status: 400 as const, error: "Human verification failed. Please retry." };
-}
+export type TurnstileOutcome =
+  | { readonly ok: true }
+  | {
+    readonly ok: false;
+    readonly status: 400 | 503;
+    readonly error: string;
+  };
+
+export const verifyTurnstile = Effect.fn("verifyTurnstile")(
+  function*(input: {
+    readonly requestUrl: string;
+    readonly secretKey: string | undefined;
+    readonly token: string | undefined;
+    readonly remoteIp: string | undefined;
+    readonly rpID: string | undefined;
+  }) {
+    if (!input.secretKey) {
+      const hostname = new URL(input.requestUrl).hostname;
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        return { ok: true } satisfies TurnstileOutcome;
+      }
+      return {
+        ok: false,
+        status: 503,
+        error: "Registration protection is not configured",
+      } satisfies TurnstileOutcome;
+    }
+    if (!input.token || input.token.length > 2048) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Complete the human verification first",
+      } satisfies TurnstileOutcome;
+    }
+
+    const form = new FormData();
+    form.set("secret", input.secretKey);
+    form.set("response", input.token);
+    if (input.remoteIp) form.set("remoteip", input.remoteIp);
+
+    const result = yield* Effect.tryPromise({
+      try: () => fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        body: form,
+      }).then((response) => response.json()),
+      catch: (cause) => TurnstileError.make({ cause }),
+    }).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(TurnstileResponse)),
+      Effect.mapError((cause) => TurnstileError.make({ cause })),
+      Effect.catchTag("TurnstileError", (error) =>
+        Effect.logError("Turnstile verification failed", error).pipe(
+          Effect.as(null),
+        )),
+    );
+
+    if (result?.success && (!input.rpID || result.hostname === input.rpID)) {
+      return { ok: true } satisfies TurnstileOutcome;
+    }
+    return {
+      ok: false,
+      status: 400,
+      error: "Human verification failed. Please retry.",
+    } satisfies TurnstileOutcome;
+  },
+);

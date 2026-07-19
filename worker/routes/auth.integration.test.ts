@@ -3,7 +3,10 @@ import { createExecutionContext } from "cloudflare:test";
 import type {
   AuthenticationResponseJSON,
   RegistrationResponseJSON,
+  VerifiedAuthenticationResponse,
+  VerifiedRegistrationResponse,
 } from "@simplewebauthn/server";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { verifyAuthentication, verifyRegistration } from "../services/webauthn";
@@ -44,19 +47,26 @@ describe("authentication ceremonies", () => {
     expect(challenge).toMatchObject({ kind: "register" });
     expect(challenge?.userId).toEqual(expect.any(String));
 
-    registrationVerifier.mockResolvedValue({
+    const registrationVerification: VerifiedRegistrationResponse = {
       verified: true,
       registrationInfo: {
+        fmt: "none",
+        aaguid: "00000000-0000-0000-0000-000000000000",
         credential: {
           id: credentialId,
           publicKey: new Uint8Array([1, 2, 3]),
           counter: 0,
           transports: ["internal"],
         },
+        credentialType: "public-key",
+        attestationObject: new Uint8Array(),
+        userVerified: true,
         credentialDeviceType: "singleDevice",
         credentialBackedUp: false,
+        origin: "http://localhost",
       },
-    } as Awaited<ReturnType<typeof verifyRegistration>>);
+    };
+    registrationVerifier.mockReturnValue(Effect.succeed(registrationVerification));
 
     const verifyBody = {
       credential: {
@@ -87,10 +97,19 @@ describe("authentication ceremonies", () => {
     const loginOptions = await request("/api/auth/login/options", { method: "POST" });
     expect(loginOptions.status).toBe(200);
     const loginCookie = ceremonyCookie(loginOptions);
-    authenticationVerifier.mockResolvedValue({
+    const authenticationVerification: VerifiedAuthenticationResponse = {
       verified: true,
-      authenticationInfo: { newCounter: 1 },
-    } as Awaited<ReturnType<typeof verifyAuthentication>>);
+      authenticationInfo: {
+        credentialID: credentialId,
+        newCounter: 1,
+        userVerified: true,
+        credentialDeviceType: "singleDevice",
+        credentialBackedUp: false,
+        origin: "http://localhost",
+        rpID: "localhost",
+      },
+    };
+    authenticationVerifier.mockReturnValue(Effect.succeed(authenticationVerification));
     const loginCredential = {
       id: credentialId,
       rawId: credentialId,
