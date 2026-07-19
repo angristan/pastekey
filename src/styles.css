@@ -120,7 +120,8 @@ a { color: inherit; }
 }
 .landing-button:hover:not(:disabled) { transform: translateY(-1px); }
 .landing-button:focus-visible { outline: 2px solid var(--deep); outline-offset: 3px; }
-.landing-button:disabled { cursor: wait; opacity: .6; }
+.landing-button:disabled { cursor: not-allowed; }
+.landing-button[aria-busy="true"] { cursor: progress; }
 .landing-button svg, .landing-button-spinner { width: 18px; height: 18px; }
 .landing-button-primary { color: var(--deep); background: var(--acid); border-color: var(--acid-dark); }
 .landing-button-primary:hover:not(:disabled) { background: #e7ff75; }
