@@ -17,6 +17,9 @@
       "head_sampling_rate": 1
     }
   },
+  "placement": {
+    "mode": "smart"
+  },
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
