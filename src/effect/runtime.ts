@@ -1,6 +1,6 @@
-import { Layer, ManagedRuntime } from "effect";
+import { Layer, ManagedRuntime, Schema } from "effect";
 
-import { ApiClientLive } from "./api";
+import { ApiClient, ApiClientLive } from "./api";
 import { BrowserCryptoLive } from "./crypto";
 import { WebAuthnLive } from "./webauthn";
 
@@ -13,3 +13,11 @@ export const browserRuntime = ManagedRuntime.make(Layer.mergeAll(
   BrowserCryptoLive,
   WebAuthnLive,
 ));
+
+export const requestApi = <S extends Schema.ConstraintDecoder<unknown>>(
+  path: string,
+  schema: S,
+  init?: RequestInit,
+): Promise<S["Type"]> => browserRuntime.runPromise(
+  ApiClient.use((client) => client.request(path, schema, init)),
+);

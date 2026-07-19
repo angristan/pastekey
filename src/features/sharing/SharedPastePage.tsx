@@ -10,13 +10,14 @@ import {
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Brand, GitHubLink } from "../../components/Brand";
 import { CenteredStatus } from "../../components/CenteredStatus";
-import { api } from "../../lib/api";
+import { requestApi } from "../../effect/runtime";
 import type { UnlockedAttachment } from "../../lib/attachments";
 import { decryptSharedPaste } from "../../lib/crypto";
 import { formatDate, messageOf } from "../../lib/format";
 import { shareSecretFromHash } from "../../lib/routes";
 import { unlockAttachments } from "../pastes/useUnlockedAttachments";
-import { itemKindOf, type PastePayload, type StoredShare } from "../../../shared/protocol/pastes";
+import { StoredShare } from "../../../shared/schema/pastes";
+import { itemKindOf, type PastePayload } from "../../../shared/protocol/pastes";
 
 const AttachmentList = lazy(() => import("../../components/AttachmentList").then((module) => ({ default: module.AttachmentList })));
 
@@ -35,7 +36,7 @@ export function SharedPastePage({ shareId }: { shareId: string }) {
       setError("This link is missing its decryption key.");
       return;
     }
-    api<StoredShare>(`/api/shares/${shareId}`)
+    requestApi(`/api/shares/${shareId}`, StoredShare)
       .then(async (stored) => {
         setMetadata(stored);
         const unlocked = await decryptSharedPaste(stored, secret);

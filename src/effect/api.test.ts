@@ -69,6 +69,7 @@ describe("ApiClient", () => {
 
       assert.instanceOf(error, ApiTransportError);
       assert.strictEqual(error.cause, cause);
+      assert.strictEqual(error.message, "offline");
       assert.strictEqual(calls, 1);
     }),
   );
@@ -125,7 +126,7 @@ describe("ApiClient", () => {
     Effect.gen(function* () {
       const client = makeApiClient(() => Promise.resolve(new Response(null, { status: 204 })));
 
-      const result = yield* client.request("/api/value", Schema.Void, { method: "DELETE" });
+      const result = yield* client.request("/api/value", Schema.Undefined, { method: "DELETE" });
 
       assert.isUndefined(result);
     }),

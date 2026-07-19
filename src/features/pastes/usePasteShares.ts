@@ -1,7 +1,8 @@
 import { useState } from "react";
 
-import { api } from "../../lib/api";
+import { requestApi } from "../../effect/runtime";
 import { messageOf } from "../../lib/format";
+import { NoContentResponse, ShareListResponse } from "../../../shared/schema/api";
 import { mergeShares, type GeneratedShare, type ShareSummary } from "./share-state";
 
 export function usePasteShares({
@@ -20,7 +21,7 @@ export function usePasteShares({
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
   async function load() {
-    const result = await api<{ shares: ShareSummary[] }>(`/api/pastes/${pasteId}/shares`);
+    const result = await requestApi(`/api/pastes/${pasteId}/shares`, ShareListResponse);
     return result.shares;
   }
 
@@ -74,7 +75,7 @@ export function usePasteShares({
     onError(null);
     setRevokingId(id);
     try {
-      await api<void>(`/api/pastes/${pasteId}/shares/${id}`, { method: "DELETE" });
+      await requestApi(`/api/pastes/${pasteId}/shares/${id}`, NoContentResponse, { method: "DELETE" });
       setShares((current) => current?.filter((item) => item.id !== id) ?? []);
       setGeneratedShares((current) => current.filter(({ shareId }) => shareId !== id));
     } catch (cause) {

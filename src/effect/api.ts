@@ -32,18 +32,21 @@ export class ApiDecodeError extends Schema.TaggedErrorClass<ApiDecodeError>()(
 export type ApiClientError = ApiTransportError | ApiStatusError | ApiDecodeError;
 
 export class ApiClient extends Context.Service<ApiClient, {
-  readonly request: <S extends Schema.Top>(
+  readonly request: <S extends Schema.ConstraintDecoder<unknown>>(
     path: string,
     schema: S,
     init?: RequestInit,
   ) => Effect.Effect<S["Type"], ApiClientError, S["DecodingServices"]>;
 }>()("pastekey/ApiClient") {}
 
+const causeMessage = (cause: unknown, fallback: string) =>
+  cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
+
 const readResponseText = (response: Response) =>
   Effect.tryPromise({
     try: () => response.text(),
     catch: (cause) => ApiTransportError.make({
-      message: "Failed to read the API response body",
+      message: causeMessage(cause, "Failed to read the API response body"),
       cause,
     }),
   });
@@ -80,7 +83,7 @@ const statusMessage = (response: Response) => {
 };
 
 export const makeApiClient = (fetchImplementation: FetchImplementation) => ApiClient.of({
-  request: <S extends Schema.Top>(path: string, schema: S, init?: RequestInit) =>
+  request: <S extends Schema.ConstraintDecoder<unknown>>(path: string, schema: S, init?: RequestInit) =>
     Effect.gen(function* () {
       const response = yield* Effect.tryPromise({
         try: (signal) => fetchImplementation(path, {
@@ -92,7 +95,7 @@ export const makeApiClient = (fetchImplementation: FetchImplementation) => ApiCl
           signal,
         }),
         catch: (cause) => ApiTransportError.make({
-          message: "API request failed before receiving a response",
+          message: causeMessage(cause, "API request failed before receiving a response"),
           cause,
         }),
       });

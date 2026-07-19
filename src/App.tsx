@@ -1,11 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { CenteredStatus } from "./components/CenteredStatus";
-import { api } from "./lib/api";
+import { requestApi } from "./effect/runtime";
 import { appConfig } from "./lib/config";
 import { messageOf } from "./lib/format";
 import { shareIdFromPath } from "./lib/routes";
-import type { MeResponse } from "../shared/protocol/auth";
+import { NoContentResponse } from "../shared/schema/api";
+import { MeResponse } from "../shared/schema/auth";
 import type { AppConfig } from "../shared/protocol/config";
 
 const Landing = lazy(() => import("./features/auth/Landing").then((module) => ({ default: module.Landing })));
@@ -30,7 +31,7 @@ function VaultApp() {
   const [error, setError] = useState<string | null>(null);
 
   const refreshMe = useCallback(async () => {
-    setMe(await api<MeResponse>("/api/auth/me"));
+    setMe(await requestApi("/api/auth/me", MeResponse));
   }, []);
 
   const loadStartup = useCallback(async () => {
@@ -65,7 +66,7 @@ function VaultApp() {
   }
 
   async function logout() {
-    await api<void>("/api/auth/logout", { method: "POST" });
+    await requestApi("/api/auth/logout", NoContentResponse, { method: "POST" });
     setAccountKey(null);
     setMe({ authenticated: false });
   }

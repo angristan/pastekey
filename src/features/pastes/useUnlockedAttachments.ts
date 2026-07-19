@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { AttachmentListResponse } from "../../../shared/schema/api";
 import type { StoredAttachment } from "../../../shared/protocol/attachments";
-import { api } from "../../lib/api";
+import { requestApi } from "../../effect/runtime";
 import type { UnlockedAttachment } from "../../lib/attachments";
 import { settledMap } from "../../lib/concurrency";
 import { decryptAttachmentMetadata } from "../../lib/crypto";
@@ -54,7 +55,7 @@ export function useUnlockedAttachments({
     setLoading(true);
     onFailure(null);
     try {
-      const response = await api<{ attachments: StoredAttachment[] }>(`/api/pastes/${pasteId}/files`);
+      const response = await requestApi(`/api/pastes/${pasteId}/files`, AttachmentListResponse);
       const result = await unlockAttachments(response.attachments, pasteKey);
       cached.current = result.values;
       cachedFailureCount.current = result.failureCount;

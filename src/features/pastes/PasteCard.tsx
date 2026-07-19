@@ -16,9 +16,10 @@ import {
 } from "@phosphor-icons/react";
 import { lazy, Suspense, useState } from "react";
 
-import { api } from "../../lib/api";
+import { requestApi } from "../../effect/runtime";
 import { downloadAttachment, type UnlockedAttachment } from "../../lib/attachments";
 import { formatBytes, formatDate, formatExpiry, messageOf } from "../../lib/format";
+import { NoContentResponse } from "../../../shared/schema/api";
 import { itemKindOf } from "../../../shared/protocol/pastes";
 import type { ShareSummary } from "./share-state";
 import type { UnlockedPaste } from "./types";
@@ -89,7 +90,11 @@ export function PasteCard({
 
   async function removeFile(attachment: UnlockedAttachment) {
     if (!window.confirm(`Remove “${attachment.metadata.name}” from this item? This cannot be undone.`)) return;
-    await api<void>(`/api/pastes/${paste.stored.id}/files/${attachment.stored.id}`, { method: "DELETE" });
+    await requestApi(
+      `/api/pastes/${paste.stored.id}/files/${attachment.stored.id}`,
+      NoContentResponse,
+      { method: "DELETE" },
+    );
     removeAttachment(attachment.stored.id);
   }
 

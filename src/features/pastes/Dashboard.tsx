@@ -15,14 +15,22 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { Brand, GitHubLink } from "../../components/Brand";
 import { CenteredStatus } from "../../components/CenteredStatus";
-import { api, jsonBody } from "../../lib/api";
+import { requestApi } from "../../effect/runtime";
+import { jsonBody } from "../../lib/api";
 import { createShareEnvelope, decryptOwnedPaste } from "../../lib/crypto";
 import { settledMap } from "../../lib/concurrency";
 import { messageOf } from "../../lib/format";
+import {
+  AccountDeletionResponse,
+  AttachmentListResponse,
+  NoContentResponse,
+  PasteListResponse,
+  ShareCreateResponse,
+} from "../../../shared/schema/api";
 import type { StoredAttachment } from "../../../shared/protocol/attachments";
 import type { MeResponse } from "../../../shared/protocol/auth";
 import type { AppConfig } from "../../../shared/protocol/config";
-import { itemKindOf, type ItemKind, type StoredPaste } from "../../../shared/protocol/pastes";
+import { itemKindOf, type ItemKind } from "../../../shared/protocol/pastes";
 import { PasteCard } from "./PasteCard";
 import type { UnlockedPaste } from "./types";
 import { unlockAttachments } from "./useUnlockedAttachments";
@@ -59,8 +67,8 @@ export function Dashboard({
     setFailedPasteCount(0);
     try {
       const [pasteResult, attachmentResult] = await Promise.all([
-        api<{ pastes: StoredPaste[] }>("/api/pastes"),
-        api<{ attachments: StoredAttachment[] }>("/api/attachments"),
+        requestApi("/api/pastes", PasteListResponse),
+        requestApi("/api/attachments", AttachmentListResponse),
       ]);
       const unlocked = await settledMap(pasteResult.pastes, 4, async (stored) => ({
         stored,
@@ -101,7 +109,7 @@ export function Dashboard({
     const noun = itemKindOf(paste.payload) === "files" ? "file drop" : "paste";
     if (!window.confirm(`Delete ${noun} “${paste.payload.title || "Untitled"}”? This cannot be undone.`)) return;
     try {
-      await api<void>(`/api/pastes/${paste.stored.id}`, { method: "DELETE" });
+      await requestApi(`/api/pastes/${paste.stored.id}`, NoContentResponse, { method: "DELETE" });
       setPastes((current) => current.filter((item) => item.stored.id !== paste.stored.id));
     } catch (cause) {
       setError(messageOf(cause));
@@ -111,7 +119,7 @@ export function Dashboard({
   async function sharePaste(paste: UnlockedPaste) {
     setError(null);
     const share = await createShareEnvelope(paste.stored.id, paste.pasteKey, paste.stored.expiresAt);
-    const created = await api<{ id: string; createdAt: number }>(`/api/pastes/${paste.stored.id}/shares`, {
+    const created = await requestApi(`/api/pastes/${paste.stored.id}/shares`, ShareCreateResponse, {
       method: "POST",
       ...jsonBody(share.write),
     });
@@ -135,7 +143,7 @@ export function Dashboard({
       if (verified.auth.userId !== me.userId) {
         throw new Error("The selected passkey belongs to another account");
       }
-      await api<{ status: "deleting" }>("/api/account", { method: "DELETE" });
+      await requestApi("/api/account", AccountDeletionResponse, { method: "DELETE" });
       window.alert("Account deletion started. Access has been revoked and encrypted storage is being removed.");
       onAccountDeleted();
     } catch (cause) {

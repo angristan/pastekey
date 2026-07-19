@@ -53,5 +53,5 @@ export class StoredShare extends Schema.Class<StoredShare>("StoredShare")({
   createdAt: Timestamp,
   updatedAt: Timestamp,
   expiresAt: NullableTimestamp,
-  attachments: Schema.Array(StoredAttachment),
+  attachments: Schema.Array(StoredAttachment).pipe(Schema.mutable),
 }) {}

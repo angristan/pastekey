@@ -18,7 +18,7 @@ export class PasskeySummary extends Schema.Class<PasskeySummary>("PasskeySummary
 export class MeResponse extends Schema.Class<MeResponse>("MeResponse")({
   authenticated: Schema.Boolean,
   userId: Schema.optionalKey(OpaqueId),
-  passkeys: Schema.optionalKey(Schema.Array(PasskeySummary)),
+  passkeys: Schema.optionalKey(Schema.Array(PasskeySummary).pipe(Schema.mutable)),
 }) {}
 
 export class AuthSuccess extends Schema.Class<AuthSuccess>("AuthSuccess")({

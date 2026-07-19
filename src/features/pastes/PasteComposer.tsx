@@ -8,8 +8,10 @@ import { ArrowClockwiseIcon, FileIcon, LockKeyIcon, PaperclipIcon, XIcon } from 
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 
 import type { AppConfig } from "../../../shared/protocol/config";
+import { PasteCreateResponse } from "../../../shared/schema/api";
 import type { ItemKind } from "../../../shared/protocol/pastes";
-import { api, jsonBody } from "../../lib/api";
+import { requestApi } from "../../effect/runtime";
+import { jsonBody } from "../../lib/api";
 import { encryptNewPaste } from "../../lib/crypto";
 import { expiryTimestamp, formatBytes, messageOf, type Expiry } from "../../lib/format";
 import {
@@ -150,7 +152,7 @@ export function PasteComposer({
         },
         expiryTimestamp(expiry),
       );
-      await api("/api/pastes", { method: "POST", ...jsonBody(encrypted.write) });
+      await requestApi("/api/pastes", PasteCreateResponse, { method: "POST", ...jsonBody(encrypted.write) });
 
       if (files.length === 0) {
         await finishCreation();

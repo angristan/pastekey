@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
+import {
+  AccountDeletionResponse,
+  AttachmentListResponse,
+  NoContentResponse,
+  PasteCreateResponse,
+  PasteListResponse,
+  ShareCreateResponse,
+  ShareListResponse,
+} from "./api";
 import { AttachmentMetadata, StoredAttachment } from "./attachments";
 import { AuthSuccess, MeResponse, WrappedKey } from "./auth";
 import { AppConfig } from "./config";
@@ -175,6 +184,48 @@ describe("attachment contracts", () => {
       .toEqual(metadata);
     expect(Schema.encodeUnknownSync(StoredAttachment)(Schema.decodeUnknownSync(StoredAttachment)(attachment)))
       .toEqual(attachment);
+  });
+});
+
+describe("API response contracts", () => {
+  it("decodes list and creation wrappers", () => {
+    const attachment = {
+      id: secondId,
+      pasteId: id,
+      ciphertextSize: 16,
+      contentIv: encoded,
+      wrappedKey: encoded,
+      wrappedKeyIv: encoded,
+      metadataCiphertext: encoded,
+      metadataIv: encoded,
+      createdAt: 100,
+    };
+    const paste = {
+      id,
+      ciphertext: encoded,
+      contentIv: encoded,
+      wrappedKey: encoded,
+      wrappedKeyIv: encoded,
+      createdAt: 100,
+      updatedAt: 200,
+      expiresAt: null,
+      version: 1,
+    };
+
+    expect(Schema.decodeUnknownSync(AttachmentListResponse)({ attachments: [attachment] }).attachments).toHaveLength(1);
+    expect(Schema.decodeUnknownSync(PasteListResponse)({ pastes: [paste] }).pastes).toHaveLength(1);
+    expect(Schema.decodeUnknownSync(PasteCreateResponse)({ id, createdAt: 100 }).id).toBe(id);
+    expect(Schema.decodeUnknownSync(ShareCreateResponse)({ id: secondId, createdAt: 100 }).id).toBe(secondId);
+    expect(Schema.decodeUnknownSync(ShareListResponse)({
+      shares: [{ id: secondId, createdAt: 100, expiresAt: null }],
+    }).shares).toHaveLength(1);
+  });
+
+  it("requires exact status and no-content shapes", () => {
+    expect(Schema.decodeUnknownSync(AccountDeletionResponse)({ status: "deleting" }).status).toBe("deleting");
+    expect(() => Schema.decodeUnknownSync(AccountDeletionResponse)({ status: "deleted" })).toThrow();
+    expect(Schema.decodeUnknownSync(NoContentResponse)(undefined)).toBeUndefined();
+    expect(() => Schema.decodeUnknownSync(NoContentResponse)(null)).toThrow();
   });
 });
 
