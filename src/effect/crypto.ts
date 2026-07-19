@@ -282,7 +282,7 @@ const preserveDecodedProperties = <A extends object>(decoded: A, input: unknown)
     ? Object.assign({}, input, decoded)
     : decoded;
 
-export const encryptBytesEffect = Effect.fn("encryptBytes")(function*(
+const encryptRawBytesEffect = Effect.fn("encryptRawBytes")(function*(
   key: CryptoKey,
   plaintext: Uint8Array<ArrayBuffer>,
   additionalData: string,
@@ -295,10 +295,18 @@ export const encryptBytesEffect = Effect.fn("encryptBytes")(function*(
     iv,
     encoder.encode(additionalData),
   ));
+  return { ciphertext, iv: toBase64Url(iv) };
+});
+
+export const encryptBytesEffect = Effect.fn("encryptBytes")(function*(
+  key: CryptoKey,
+  plaintext: Uint8Array<ArrayBuffer>,
+  additionalData: string,
+) {
+  const encrypted = yield* encryptRawBytesEffect(key, plaintext, additionalData);
   return {
-    ciphertext,
-    encodedCiphertext: toBase64Url(ciphertext),
-    iv: toBase64Url(iv),
+    ...encrypted,
+    encodedCiphertext: toBase64Url(encrypted.ciphertext),
   };
 });
 
@@ -550,7 +558,7 @@ export const encryptAttachmentEffect = Effect.fn("encryptAttachment")(function*(
     `pastekey/file-metadata/${id}/${pasteId}/v1`,
   );
   const contentBuffer = yield* browserCrypto.readFile(file);
-  const content = yield* encryptBytesEffect(
+  const content = yield* encryptRawBytesEffect(
     fileKey,
     new Uint8Array(contentBuffer),
     `pastekey/file-content/${id}/${pasteId}/v1`,
