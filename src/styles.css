@@ -55,6 +55,21 @@ a { color: inherit; }
 }
 
 .brand-link { text-decoration: none; }
+.github-link {
+  min-height: 34px;
+  padding: 7px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 8px;
+  color: var(--deep);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+.github-link:hover { background: rgba(30, 58, 52, .07); }
+.github-link:focus-visible { outline: 2px solid var(--deep); outline-offset: 2px; }
+.github-link svg { width: 17px; height: 17px; }
 .hero {
   min-height: calc(100vh - 82px);
   display: grid;
@@ -90,15 +105,54 @@ a { color: inherit; }
 }
 
 .hero-actions { display: flex; gap: 12px; margin: 18px 0 22px; flex-wrap: wrap; }
+.landing-button {
+  min-height: 48px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: 750;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.landing-button:hover:not(:disabled) { transform: translateY(-1px); }
+.landing-button:focus-visible { outline: 2px solid var(--deep); outline-offset: 3px; }
+.landing-button:disabled { cursor: wait; opacity: .6; }
+.landing-button svg, .landing-button-spinner { width: 18px; height: 18px; }
+.landing-button-primary { color: var(--deep); background: var(--acid); border-color: var(--acid-dark); }
+.landing-button-primary:hover:not(:disabled) { background: #e7ff75; }
+.landing-button-secondary { color: var(--deep); background: var(--paper); border-color: #c8c5ba; }
+.landing-button-secondary:hover:not(:disabled) { background: #efede5; border-color: #9da89e; }
+.landing-button-spinner {
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+.landing-error {
+  max-width: 610px;
+  padding: 13px 15px;
+  border: 1px solid #e3b4aa;
+  border-radius: 9px;
+  color: #8f2929;
+  background: #fff0ed;
+}
+.landing-error strong { display: block; font-size: 14px; }
+.landing-error p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
 .turnstile { width: 100%; }
 .turnstile-visible { min-height: 65px; margin-top: 28px; }
 .hero-copy > [role="alert"] { max-width: 610px; }
 
 .security-card {
-  padding: 0 !important;
+  padding: 0;
   overflow: hidden;
-  border: 1px solid rgba(30, 58, 52, .2) !important;
-  box-shadow: 16px 18px 0 rgba(30, 58, 52, .09) !important;
+  border: 1px solid rgba(30, 58, 52, .2);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 16px 18px 0 rgba(30, 58, 52, .09);
   transform: rotate(1.5deg);
 }
 
@@ -460,6 +514,8 @@ a { color: inherit; }
   .brandbar, .app-header { min-height: 64px; }
   .hero { min-height: auto; padding: 54px 0 70px; gap: 60px; }
   .hero h1 { font-size: clamp(42px, 13vw, 53px); }
+  .hero-actions { align-items: stretch; flex-direction: column; }
+  .landing-button { width: 100%; }
   .security-visual { min-height: 280px; }
   .header-actions .encrypted-state, .desktop-add-passkey { display: none; }
   .dashboard-head { padding-top: 45px; align-items: stretch; }

@@ -1,6 +1,3 @@
-import { Banner } from "@cloudflare/kumo/components/banner";
-import { Button } from "@cloudflare/kumo/components/button";
-import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import { FingerprintIcon, KeyIcon, LockKeyIcon, PlusIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
@@ -50,24 +47,36 @@ export function Landing({
             <Turnstile key={challengeVersion} siteKey={config.turnstileSiteKey} onToken={setTurnstileToken} />
           )}
           <div className="hero-actions">
-            <Button
-              variant="primary"
-              size="lg"
-              icon={PlusIcon}
-              loading={busy === "register"}
-              disabled={Boolean(config.turnstileSiteKey && !turnstileToken)}
+            <button
+              aria-busy={busy === "register"}
+              className="landing-button landing-button-primary"
+              type="button"
+              disabled={busy !== null || Boolean(config.turnstileSiteKey && !turnstileToken)}
               onClick={register}
             >
-              Create a vault
-            </Button>
-            <Button size="lg" icon={FingerprintIcon} loading={busy === "unlock"} onClick={onUnlock}>
-              Unlock your vault
-            </Button>
+              {busy === "register" ? <span className="landing-button-spinner" /> : <PlusIcon aria-hidden />}
+              {busy === "register" ? "Creating…" : "Create a vault"}
+            </button>
+            <button
+              aria-busy={busy === "unlock"}
+              className="landing-button landing-button-secondary"
+              type="button"
+              disabled={busy !== null}
+              onClick={onUnlock}
+            >
+              {busy === "unlock" ? <span className="landing-button-spinner" /> : <FingerprintIcon aria-hidden />}
+              {busy === "unlock" ? "Unlocking…" : "Unlock your vault"}
+            </button>
           </div>
-          {error && <Banner variant="error" title="Could not continue" description={error} />}
+          {error && (
+            <div className="landing-error" role="alert">
+              <strong>Could not continue</strong>
+              <p>{error}</p>
+            </div>
+          )}
         </div>
 
-        <LayerCard className="security-card">
+        <aside aria-label="Encryption overview" className="security-card">
           <div className="security-visual">
             <div className="key-orbit"><KeyIcon size={38} weight="duotone" /></div>
             <div className="cipher-lines" aria-hidden="true">
@@ -83,7 +92,7 @@ export function Landing({
               <p>Your browser encrypts everything. Share keys stay in the link fragment and never reach the server.</p>
             </div>
           </div>
-        </LayerCard>
+        </aside>
       </section>
     </main>
   );

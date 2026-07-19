@@ -1,18 +1,16 @@
-import { LinkButton } from "@cloudflare/kumo/components/button";
 import { GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 
 export function GitHubLink() {
   return (
-    <LinkButton
+    <a
       className="github-link"
       href="https://github.com/angristan/pastekey"
-      external
-      size="sm"
-      variant="ghost"
-      icon={GithubLogoIcon}
+      rel="noreferrer"
+      target="_blank"
     >
-      GitHub
-    </LinkButton>
+      <GithubLogoIcon aria-hidden />
+      <span>GitHub</span>
+    </a>
   );
 }
 

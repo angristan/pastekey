@@ -1,3 +1,4 @@
+import "@cloudflare/kumo/styles/standalone";
 import { Button } from "@cloudflare/kumo/components/button";
 import { LayerCard } from "@cloudflare/kumo/components/layer-card";
 import {
