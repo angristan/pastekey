@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "@effect/vitest";
-import { Effect, Fiber } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiStatusError } from "../../effect/api";
 import {
@@ -7,7 +6,6 @@ import {
   discardUploadSession,
   type SelectedFile,
   uploadSelectedFile,
-  uploadSelectedFileEffect,
   uploadUntilFailure,
 } from "./useUploadSession";
 
@@ -94,17 +92,18 @@ describe("upload payload ownership", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ phase: "complete" }));
   });
 
-  it.effect("aborts the default upload when the outer effect is interrupted", () => Effect.gen(function*() {
+  it("aborts the default upload through the Promise host adapter", async () => {
     vi.stubGlobal("XMLHttpRequest", PendingXMLHttpRequest);
     const cache = createUploadPayloadCache();
     cache.retain("selection", payload);
-    const pasteKey = yield* Effect.promise(() => crypto.subtle.generateKey(
+    const pasteKey = await crypto.subtle.generateKey(
       { name: "AES-GCM", length: 256 },
       false,
       ["encrypt"],
-    ));
+    );
+    const controller = new AbortController();
 
-    const fiber = yield* Effect.forkChild(uploadSelectedFileEffect({
+    const upload = uploadSelectedFile({
       selected: {
         id: "selection",
         file: new File(["content"], "file.txt"),
@@ -114,14 +113,14 @@ describe("upload payload ownership", () => {
       session: { pasteId: "paste-000000000000001", pasteKey },
       payloads: cache,
       update: vi.fn(),
-    }));
-    yield* Effect.yieldNow;
+    }, { signal: controller.signal });
+    await vi.waitFor(() => expect(PendingXMLHttpRequest.sends).toBe(1));
 
-    expect(PendingXMLHttpRequest.sends).toBe(1);
-    yield* Fiber.interrupt(fiber);
+    controller.abort();
+    await expect(upload).rejects.toBeDefined();
     expect(PendingXMLHttpRequest.aborts).toBe(1);
     expect(cache.size).toBe(1);
-  }));
+  });
 
   it("stops before encrypting more files after the first failure", async () => {
     const files: SelectedFile[] = ["first", "failed", "not-started"].map((id) => ({

@@ -87,8 +87,13 @@ export function useUploadSession() {
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [session, setSession] = useState<UploadSession | null>(null);
   const payloads = useRef(createUploadPayloadCache());
+  const uploads = useRef(new Map<string, AbortController>());
 
-  useEffect(() => () => payloads.current.clear(), []);
+  useEffect(() => () => {
+    for (const controller of uploads.current.values()) controller.abort();
+    uploads.current.clear();
+    payloads.current.clear();
+  }, []);
 
   function appendFiles(selected: File[]) {
     setFiles((current) => [
@@ -98,6 +103,8 @@ export function useUploadSession() {
   }
 
   function removeFile(id: string) {
+    uploads.current.get(id)?.abort();
+    uploads.current.delete(id);
     payloads.current.release(id);
     setFiles((current) => current.filter((item) => item.id !== id));
   }
@@ -107,11 +114,18 @@ export function useUploadSession() {
   }
 
   function uploadFile(selected: SelectedFile, uploadSession: UploadSession) {
+    uploads.current.get(selected.id)?.abort();
+    const controller = new AbortController();
+    uploads.current.set(selected.id, controller);
     return uploadSelectedFile({
       selected,
       session: uploadSession,
       payloads: payloads.current,
       update: (patch) => updateFile(selected.id, patch),
+    }, { signal: controller.signal }).finally(() => {
+      if (uploads.current.get(selected.id) === controller) {
+        uploads.current.delete(selected.id);
+      }
     });
   }
 
@@ -120,6 +134,8 @@ export function useUploadSession() {
   }
 
   function finishSession() {
+    for (const controller of uploads.current.values()) controller.abort();
+    uploads.current.clear();
     payloads.current.clear();
     setSession(null);
   }
@@ -225,8 +241,11 @@ export const uploadSelectedFileEffect = Effect.fn("uploadSelectedFile")(function
 });
 
 /** Promise adapter retained for React event handlers. */
-export function uploadSelectedFile(input: UploadSelectedFileInput): Promise<boolean> {
-  return runClientPromise(uploadSelectedFileEffect(input));
+export function uploadSelectedFile(
+  input: UploadSelectedFileInput,
+  options?: Effect.RunOptions,
+): Promise<boolean> {
+  return runClientPromise(uploadSelectedFileEffect(input), options);
 }
 
 export const uploadUntilFailureEffect: <E, R>(
