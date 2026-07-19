@@ -48,6 +48,7 @@ app.on(["GET", "HEAD"], "/s/:id", async (c) => {
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 app.get("/api/config", (c) => {
+  c.header("Cache-Control", "public, max-age=300");
   const hostname = new URL(c.req.url).hostname;
   const localWithoutSecret = (hostname === "localhost" || hostname === "127.0.0.1") && !c.env.TURNSTILE_SECRET_KEY;
   return c.json<AppConfig>({

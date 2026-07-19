@@ -10,9 +10,10 @@ const context = {
 } as unknown as ExecutionContext;
 
 describe("Worker composition", () => {
-  it("serves health through the composition root", async () => {
+  it("serves uncached health through the composition root", async () => {
     const response = await worker.fetch(new Request("https://paste.test/api/health"), env(), context);
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({ ok: true });
   });
 
@@ -28,8 +29,9 @@ describe("Worker composition", () => {
     await expect(response.text()).resolves.toContain("<title>Pastekey");
   });
 
-  it("exposes limits and the production Turnstile site key", async () => {
+  it("exposes cacheable limits and the production Turnstile site key", async () => {
     const response = await worker.fetch(new Request("https://paste.test/api/config"), env(), context);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=300");
     await expect(response.json()).resolves.toEqual({
       limits: {
         maxFileBytes: 1024,
