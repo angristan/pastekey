@@ -40,7 +40,7 @@ export type AttachmentDeletion = {
   readonly ciphertextSize: number;
 };
 
-const stageDeletionEffect = Effect.fn("Deletions.stageDeletion")(
+export const stageDeletion = Effect.fn("Deletions.stageDeletion")(
   function* (deletion: AttachmentDeletion, createdAt = Date.now()) {
     const d1 = yield* D1;
     return yield* d1.run(
@@ -59,43 +59,6 @@ const stageDeletionEffect = Effect.fn("Deletions.stageDeletion")(
     );
   },
 );
-
-// Compatibility overload for the attachment route's next vertical-slice commit.
-export function stageDeletion(
-  db: D1Database,
-  deletion: AttachmentDeletion,
-  createdAt?: number,
-): D1PreparedStatement;
-export function stageDeletion(
-  deletion: AttachmentDeletion,
-  createdAt?: number,
-): ReturnType<typeof stageDeletionEffect>;
-export function stageDeletion(
-  target: D1Database | AttachmentDeletion,
-  deletionOrCreatedAt?: AttachmentDeletion | number,
-  createdAt = Date.now(),
-) {
-  if ("prepare" in target) {
-    if (typeof deletionOrCreatedAt !== "object") {
-      throw new TypeError("Attachment deletion is required");
-    }
-    return target.prepare(
-      `INSERT OR IGNORE INTO deletion_jobs (
-      id, owner_id, object_key, ciphertext_size, created_at, queued_at
-    ) VALUES (?, ?, ?, ?, ?, NULL)`,
-    ).bind(
-      deletionOrCreatedAt.id,
-      deletionOrCreatedAt.ownerId,
-      deletionOrCreatedAt.objectKey,
-      deletionOrCreatedAt.ciphertextSize,
-      createdAt,
-    );
-  }
-  return stageDeletionEffect(
-    target,
-    typeof deletionOrCreatedAt === "number" ? deletionOrCreatedAt : Date.now(),
-  );
-}
 
 /** Dispatches one bounded batch and atomically marks every selected job queued. */
 export const dispatchPendingAttachmentDeletions = Effect.fn(

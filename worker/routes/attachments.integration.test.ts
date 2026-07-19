@@ -4,10 +4,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { hashToken } from "../lib/encoding";
 import { finalizeAttachment, reserveAttachment } from "../repositories/attachments";
+import { runWorkerEffect } from "../runtime";
 import { consumeDeletionQueue } from "../services/deletions";
 import type { Bindings, DeletionMessage } from "../types";
 
-const bindings = env as unknown as Bindings;
+function isBindings(value: unknown): value is Bindings {
+  return typeof value === "object" && value !== null;
+}
+
+if (!isBindings(env)) throw new Error("Cloudflare test bindings are unavailable");
+const bindings = env;
 const userId = "testuser12345678901234";
 const pasteId = "testpaste1234567890123";
 const fileId = "testfile12345678901234";
@@ -74,17 +80,17 @@ describe("authenticated attachment routes", () => {
 
   it("rejects finalization after account deletion begins", async () => {
     const reservation = { id: fileId, pasteId, ownerId: userId, objectKey, ciphertextSize: 32 };
-    expect((await reserveAttachment(bindings.DB, reservation, {
+    expect((await runWorkerEffect(bindings, reserveAttachment(reservation, {
       maxFilesPerPaste: 10,
       maxStorageBytes: 1024,
-    })).meta.changes).toBe(1);
+    }))).meta.changes).toBe(1);
     await bindings.DB.prepare(
       "UPDATE users SET deletion_requested_at = ?, deletion_workflow_id = ? WHERE id = ?",
     )
       .bind(Date.now(), "account-test-workflow", userId)
       .run();
 
-    const result = await finalizeAttachment(bindings.DB, {
+    const result = await runWorkerEffect(bindings, finalizeAttachment({
       ...reservation,
       contentIv: "AA",
       wrappedKey: "AA",
@@ -92,7 +98,7 @@ describe("authenticated attachment routes", () => {
       metadataCiphertext: "AA",
       metadataIv: "AA",
       createdAt: Date.now(),
-    });
+    }));
 
     expect(result.meta.changes).toBe(0);
     expect(await bindings.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(fileId).first()).toBeNull();
@@ -107,19 +113,19 @@ describe("authenticated attachment routes", () => {
       ciphertextSize: 32,
     }));
     const fileResults = await Promise.all(
-      reservations.map((reservation) => reserveAttachment(bindings.DB, reservation, {
+      reservations.map((reservation) => runWorkerEffect(bindings, reserveAttachment(reservation, {
         maxFilesPerPaste: 2,
         maxStorageBytes: 1024,
-      })),
+      }))),
     );
     expect(fileResults.reduce((sum, result) => sum + result.meta.changes, 0)).toBe(2);
 
     await bindings.DB.prepare("DELETE FROM upload_reservations WHERE owner_id = ?").bind(userId).run();
     const storageResults = await Promise.all(
-      reservations.map((reservation) => reserveAttachment(bindings.DB, reservation, {
+      reservations.map((reservation) => runWorkerEffect(bindings, reserveAttachment(reservation, {
         maxFilesPerPaste: 10,
         maxStorageBytes: 64,
-      })),
+      }))),
     );
     expect(storageResults.reduce((sum, result) => sum + result.meta.changes, 0)).toBe(2);
   });

@@ -1,10 +1,16 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { runWorkerEffect } from "../runtime";
 import { uploadAttachment } from "./attachment-upload";
 import type { Bindings } from "../types";
 
-const bindings = env as unknown as Bindings;
+function isBindings(value: unknown): value is Bindings {
+  return typeof value === "object" && value !== null;
+}
+
+if (!isBindings(env)) throw new Error("Cloudflare test bindings are unavailable");
+const bindings = env;
 const userId = "ambiguous-user-00000001";
 const pasteId = "ambiguous-paste-0000001";
 const fileId = "ambiguous-file-00000001";
@@ -30,33 +36,40 @@ describe("attachment upload finalization", () => {
   });
 
   it("keeps ciphertext when D1 commits but loses the finalize response", async () => {
-    const ambiguousDb = {
-      prepare: bindings.DB.prepare.bind(bindings.DB),
-      batch: async (statements: D1PreparedStatement[]) => {
-        await bindings.DB.batch(statements);
-        throw new Error("D1 response lost after commit");
+    const ambiguousDb = new Proxy(bindings.DB, {
+      get(target, property) {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            await target.batch(statements);
+            throw new Error("D1 response lost after commit");
+          };
+        }
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
       },
-    } as unknown as D1Database;
+    });
 
-    const outcome = await uploadAttachment(
+    const outcome = await runWorkerEffect(
       { ...bindings, DB: ambiguousDb },
-      {
-        pasteId,
-        fileId,
-        ownerId: userId,
-        objectKey,
-        ciphertextSize: 32,
-        body: new Blob([new Uint8Array(32)]).stream(),
-        headers: {
-          contentIv: "AA",
-          wrappedKey: "AA",
-          wrappedKeyIv: "AA",
-          metadataCiphertext: "AA",
-          metadataIv: "AA",
+      uploadAttachment(
+        {
+          pasteId,
+          fileId,
+          ownerId: userId,
+          objectKey,
+          ciphertextSize: 32,
+          body: new Blob([new Uint8Array(32)]).stream(),
+          headers: {
+            contentIv: "AA",
+            wrappedKey: "AA",
+            wrappedKeyIv: "AA",
+            metadataCiphertext: "AA",
+            metadataIv: "AA",
+          },
+          limits: { maxFilesPerPaste: 10, maxStorageBytes: 1_024 },
         },
-        limits: { maxFilesPerPaste: 10, maxStorageBytes: 1_024 },
-      },
-      () => undefined,
+        () => undefined,
+      ),
     );
 
     expect(outcome.status).toBe("created");
