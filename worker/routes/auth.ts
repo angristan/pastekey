@@ -21,6 +21,7 @@ import {
   type AuthVerifiers,
   defaultAuthVerifiers,
   ensureInitialRegistrationAllowed,
+  findLoginCeremony,
   findRegistrationCeremony,
   finishLogin,
   finishRegistration,
@@ -155,17 +156,25 @@ export function createAuthRoutes(
   });
 
   authRoutes.post("/api/auth/login/verify", async (c) => {
+    const ceremonyId = getCookie(c, CEREMONY_COOKIE);
+    if (!ceremonyId) return c.json({ error: "Sign-in ceremony expired" }, 400);
+
     const body = await runWorkerEffect(
       c.env,
       decodeJsonBody(c, WEBAUTHN_JSON_BODY_BYTES, LoginVerifyRequest),
     );
-    if (body === null) return c.json({ error: "Invalid sign-in response" }, 400);
+    if (body === null) {
+      const ceremony = await runWorkerEffect(c.env, findLoginCeremony(ceremonyId));
+      return ceremony === null
+        ? c.json({ error: "Sign-in ceremony expired" }, 400)
+        : c.json({ error: "Invalid sign-in response" }, 400);
+    }
 
     const { rpID, origin } = relyingParty(c);
     const outcome = await runAuth(
       c,
       finishLogin(verifiers, {
-        ceremonyId: getCookie(c, CEREMONY_COOKIE),
+        ceremonyId,
         credential: body.credential,
         rpID,
         origin,

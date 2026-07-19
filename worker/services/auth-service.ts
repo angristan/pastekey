@@ -33,6 +33,8 @@ const CredentialDescriptorRow = Schema.Struct({
   transports: Schema.String,
 });
 
+const CredentialIdentityRow = Schema.Struct({ id: Schema.String });
+
 const LoginContextRow = Schema.Struct({
   ceremonyId: Schema.String,
   challenge: Schema.String,
@@ -269,6 +271,12 @@ export const startLogin = Effect.fn("startLogin")(
   },
 );
 
+export const findLoginCeremony = Effect.fn("findLoginCeremony")(
+  function*(id: string | undefined) {
+    return id ? yield* findCeremony(id, ["login"]) : null;
+  },
+);
+
 export const finishLogin = Effect.fn("finishLogin")(
   function*(
     verifiers: AuthVerifiers,
@@ -372,20 +380,37 @@ export const finishLogin = Effect.fn("finishLogin")(
       ),
       d1.bind(
         d1.prepare(
-          "DELETE FROM auth_challenges WHERE id = ? AND kind = 'login' AND expires_at > ?",
+          `DELETE FROM auth_challenges
+     WHERE id = ? AND kind = 'login' AND expires_at > ?
+       AND EXISTS (
+         SELECT 1 FROM credentials c JOIN users u ON u.id = c.user_id
+         WHERE c.id = ? AND c.user_id = ? AND u.deletion_requested_at IS NULL
+           AND (auth_challenges.user_id IS NULL OR auth_challenges.user_id = c.user_id)
+       )`,
         ),
         context.ceremonyId,
         session.createdAt,
+        context.credentialId,
+        context.userId,
       ),
     ]);
     const sessionCreated = Boolean(results[1]?.meta.changes);
     const challengeConsumed = Boolean(results[2]?.meta.changes);
     if (!sessionCreated || !challengeConsumed) {
-      if (!challengeConsumed) return yield* fail(400, "Sign-in ceremony expired");
-      return yield* SessionError.make({
-        operation: "create",
-        message: "Account is unavailable",
-      });
+      const activeCredential = yield* d1.first(
+        d1.bind(
+          d1.prepare(
+            `SELECT c.id FROM credentials c JOIN users u ON u.id = c.user_id
+         WHERE c.id = ? AND c.user_id = ? AND u.deletion_requested_at IS NULL`,
+          ),
+          context.credentialId,
+          context.userId,
+        ),
+        CredentialIdentityRow,
+      );
+      return activeCredential === null
+        ? yield* fail(401, "Unknown passkey")
+        : yield* fail(400, "Sign-in ceremony expired");
     }
 
     const response: AuthSuccess = {

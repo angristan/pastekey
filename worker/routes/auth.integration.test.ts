@@ -192,6 +192,14 @@ describe("authentication ceremonies", () => {
   it("rejects missing, expired, unknown, and deleting-account login contexts", async () => {
     const credential = loginCredential(credentialId);
 
+    const missingMalformed = await request("/api/auth/login/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(missingMalformed.status).toBe(400);
+    await expect(missingMalformed.json()).resolves.toEqual({ error: "Sign-in ceremony expired" });
+
     const missing = await request("/api/auth/login/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -204,6 +212,14 @@ describe("authentication ceremonies", () => {
     const expiredCookie = ceremonyCookie(expiredOptions);
     await bindings.DB.prepare("UPDATE auth_challenges SET expires_at = ? WHERE id = ?")
       .bind(Date.now() - 1, cookieValue(expiredCookie)).run();
+    const expiredMalformed = await request("/api/auth/login/verify", {
+      method: "POST",
+      headers: { Cookie: expiredCookie, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(expiredMalformed.status).toBe(400);
+    await expect(expiredMalformed.json()).resolves.toEqual({ error: "Sign-in ceremony expired" });
+
     const expired = await request("/api/auth/login/verify", {
       method: "POST",
       headers: { Cookie: expiredCookie, "Content-Type": "application/json" },
@@ -234,6 +250,35 @@ describe("authentication ceremonies", () => {
     expect(deleting.status).toBe(401);
     await expect(deleting.json()).resolves.toEqual({ error: "Unknown passkey" });
     expect(authenticationVerifier).not.toHaveBeenCalled();
+  });
+
+  it("keeps the ceremony when account deletion begins during verification", async () => {
+    await seedCredential(userId, credentialId);
+    const options = await request("/api/auth/login/options", { method: "POST" });
+    const loginCookie = ceremonyCookie(options);
+    authenticationVerifier.mockImplementation(() =>
+      Effect.promise(async () => {
+        await bindings.DB.prepare(
+          "UPDATE users SET deletion_requested_at = ?, deletion_workflow_id = ? WHERE id = ?",
+        ).bind(Date.now(), "auth-login-race", userId).run();
+        return authenticationSuccess(credentialId, 1);
+      })
+    );
+
+    const response = await request("/api/auth/login/verify", {
+      method: "POST",
+      headers: { Cookie: loginCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: loginCredential(credentialId) }),
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Unknown passkey" });
+    expect(await bindings.DB.prepare("SELECT id FROM auth_challenges WHERE id = ?")
+      .bind(cookieValue(loginCookie)).first()).not.toBeNull();
+    expect(await bindings.DB.prepare("SELECT id FROM sessions WHERE user_id = ?")
+      .bind(userId).first()).toBeNull();
+    expect(await bindings.DB.prepare("SELECT counter FROM credentials WHERE id = ?")
+      .bind(credentialId).first()).toEqual({ counter: 0 });
   });
 
   it("rejects a credential outside an account-bound ceremony", async () => {
