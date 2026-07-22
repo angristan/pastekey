@@ -3,14 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.3.9",
   "scripts": {
     "dev": "vite",
     "build": "bun run typecheck && vite build",
     "preview": "vite preview",
-    "verify": "bun audit && bun run test && bun run build && wrangler deploy --dry-run",
+    "verify": "bun audit && bun run cf-typegen:check && bun run test && bun run build && wrangler deploy --dry-run",
     "deploy": "bun run verify && wrangler d1 migrations apply pastekey --remote && wrangler deploy && bun run smoke:production",
     "db:migrate:local": "wrangler d1 migrations apply pastekey --local",
     "db:migrate:remote": "wrangler d1 migrations apply pastekey --remote",
+    "cf-typegen": "wrangler types",
+    "cf-typegen:check": "wrangler types --check",
     "typecheck": "bun run typecheck:client && bun run typecheck:worker && bun run typecheck:tools",
     "typecheck:client": "tsc -p tsconfig.client.json",
     "typecheck:worker": "tsc -p tsconfig.worker.json",
@@ -28,16 +31,18 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.44.0",
-    "@cloudflare/vitest-pool-workers": "0.18.4",
-    "@cloudflare/workers-types": "5.20260711.1",
+    "@cloudflare/vite-plugin": "1.46.0",
+    "@cloudflare/vitest-pool-workers": "0.18.7",
     "@effect/vitest": "4.0.0-beta.97",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
     "typescript": "7.0.2",
-    "vite": "8.1.4",
+    "vite": "8.1.5",
     "vitest": "4.1.10",
-    "wrangler": "4.110.0"
+    "wrangler": "4.113.0"
+  },
+  "overrides": {
+    "sharp": "0.35.3"
   }
 }

@@ -8,35 +8,14 @@ import type {
 export type AccountDeletionPayload = typeof AccountDeletionPayloadSchema.Encoded;
 export type DeletionMessage = typeof DeletionMessageSchema.Encoded;
 
-export interface FlagshipBinding {
-  readonly getBooleanValue: (
-    flagKey: string,
-    defaultValue: boolean,
-    context?: FlagshipEvaluationContext,
-  ) => Promise<boolean>;
-}
+type WidenConfiguredValues<T> = {
+  readonly [Key in keyof T]: T[Key] extends string ? string : T[Key];
+};
 
-export type Bindings = {
-  DB: D1Database;
-  FILES: R2Bucket;
-  EVENTS: AnalyticsEngineDataset;
-  FLAGS: FlagshipBinding;
-  DELETION_QUEUE: Queue<DeletionMessage>;
-  ACCOUNT_DELETION: Workflow<AccountDeletionPayload>;
-  ASSETS: Fetcher;
-  AUTH_RATE_LIMITER: RateLimit;
-  WRITE_RATE_LIMITER: RateLimit;
-  MAX_FILE_BYTES?: string;
-  MAX_FILES_PER_PASTE?: string;
-  MAX_PASTES_PER_USER?: string;
-  MAX_STORAGE_BYTES?: string;
-  DELETION_QUEUE_NAME?: string;
-  DELETION_DLQ_NAME?: string;
-  ORIGIN?: string;
-  RP_ID?: string;
-  RP_NAME?: string;
-  TURNSTILE_SECRET_KEY?: string;
-  TURNSTILE_SITE_KEY?: string;
+export type FlagshipBinding = Pick<Env["FLAGS"], "getBooleanValue">;
+
+export type Bindings = WidenConfiguredValues<Omit<Env, "DELETION_QUEUE">> & {
+  readonly DELETION_QUEUE: Queue<DeletionMessage>;
 };
 
 export type Variables = {

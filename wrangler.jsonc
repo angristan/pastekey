@@ -3,7 +3,8 @@
   "name": "pastekey",
   "main": "worker/index.ts",
   "compatibility_date": "2026-07-15",
-  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
   "upload_source_maps": true,
   "observability": {
     "enabled": true,
@@ -78,7 +79,7 @@
         "queue": "pastekey-deletions-dlq",
         "max_batch_size": 10,
         "max_batch_timeout": 5,
-        "max_retries": 100,
+        "max_retries": 12,
         "retry_delay": 300,
         "max_concurrency": 1
       }
@@ -106,6 +107,9 @@
   ],
   "triggers": {
     "crons": ["17 * * * *"]
+  },
+  "secrets": {
+    "required": ["TURNSTILE_SECRET_KEY"]
   },
   "vars": {
     "MAX_FILE_BYTES": "26214400",

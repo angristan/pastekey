@@ -204,3 +204,16 @@ The configured rate limits are 20 authentication mutations and 30 write mutation
 | `bun run smoke:production` | Run bounded read-only checks against production |
 
 CI installs with the frozen Bun lockfile and runs `bun run verify` for pushes to `main` and pull requests.
+
+## Operations and recovery
+
+Apply D1 migrations before code that requires them and keep the previous Worker compatible with the migrated schema. A Worker rollback does not undo D1, R2, Queue, Workflow, or passkey state. For an application-only regression, use the project-pinned Wrangler to list deployments and roll back the Worker, then run the production smoke checks and verify registration state, sign-in, share retrieval, and account deletion status. For data corruption, stop writes and restore through the current D1 Time Travel procedure only after rehearsing against a disposable database; R2 ciphertext recovery must be handled and verified separately.
+
+Routine ciphertext deletion is staged durably in `deletion_jobs`. The primary Queue retries five times before moving a message to the DLQ. The DLQ consumer retries persistence twelve times at five-minute intervals, then Cloudflare may discard that delivery. The hourly reconciliation job preserves correctness: a job whose `queued_at` remains stale for 25 hours is returned to the durable retry cycle with bounded backoff. When deletion failures persist:
+
+1. inspect Workers Logs, the primary Queue, the DLQ, and the matching `deletion_jobs` row without exposing object keys or owner identifiers;
+2. correct the D1, R2, Queue, or binding failure rather than replaying payloads manually;
+3. let scheduled reconciliation redispatch stale work, or perform a reviewed D1 state repair only after recording the affected rows and rollback plan;
+4. confirm the R2 object is absent and the durable job row is removed.
+
+Record the Worker version, migration state, Queue retry cycle, Workflow status, recovery point, and smoke-test results for every production recovery.
