@@ -14,8 +14,8 @@ assert(html.includes("<title>Pastekey — Private, encrypted sharing</title>"), 
 assert(root.headers.get("content-security-policy")?.includes("frame-ancestors 'none'") === true, "CSP is missing");
 
 const share = await fetch(`${origin}/s/smoke-share-0000000001`);
-assert(share.ok, `direct share shell returned ${share.status}`);
-assert(share.headers.get("content-type")?.includes("text/html") === true, "direct share is not HTML");
+assert(share.ok, `edge-served share shell returned ${share.status}`);
+assert(share.headers.get("content-type")?.includes("text/html") === true, "edge-served share is not HTML");
 assert(share.headers.get("x-robots-tag") === "noindex, nofollow, noarchive", "direct share indexing policy is missing");
 
 const image = await fetch(`${origin}/og-image.png`);

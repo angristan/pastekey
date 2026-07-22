@@ -17,16 +17,14 @@ describe("Worker composition", () => {
     await expect(response.json()).resolves.toEqual({ ok: true });
   });
 
-  it("serves direct share routes with generic noindex HTML", async () => {
+  it("does not serve static routes when invoked directly", async () => {
     const response = await worker.fetch(
       new Request("https://paste.test/s/AAAAAAAAAAAAAAAAAAAA"),
       env(),
       context,
     );
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Content-Type")).toContain("text/html");
-    expect(response.headers.get("X-Robots-Tag")).toBe("noindex, nofollow, noarchive");
-    await expect(response.text()).resolves.toContain("<title>Pastekey");
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Not found" });
   });
 
   it("exposes cacheable limits, flags, and the production Turnstile site key", async () => {
@@ -53,11 +51,6 @@ describe("Worker composition", () => {
 
 function env(registrationEnabled = true): Bindings {
   return {
-    ASSETS: {
-      fetch: async () => new Response("<!doctype html><title>Pastekey — Private, encrypted sharing</title>", {
-        headers: { "Content-Type": "text/html; charset=UTF-8" },
-      }),
-    } as unknown as Fetcher,
     FLAGS: {
       getBooleanValue: () => Promise.resolve(registrationEnabled),
     },
